@@ -1,52 +1,39 @@
-# V8 feature integration report — 2026-10-12
+# V8 experience + V9 VNI repair report — 2026-10-12
 
-## Architecture retained from v9
+## Root causes and repairs
 
-| Function | Implementation |
-|---|---|
-| Vietnamese input | Fcitx5 + UniKey VNI on Android; explicit verified UniKey subtype |
-| Keyboard/mouse transport | scrcpy 4.1 UHID, no video/audio |
-| Unicode text clipboard | Existing scrcpy clipboard protocol; no second synchronizer |
-| Lifecycle | Single launcher/mutex, one supervised scrcpy child, bounded restart, tray Exit |
-| Routing | Alt+1 enters Android; RightAlt releases UHID and restores the saved Windows foreground window |
-
-## V8 behavior transferred
-
-| V8 behavior | V9 integration |
-|---|---|
-| Android screenshot to Windows clipboard | Reused the proven ADB screencap/pull/clipboard approach, with clipboard retry/read-back |
-| Contextual physical PrtScr | Reimplemented as a state-bound hotkey: registered only while routing is Android, unregistered on return/disconnect |
-| Cleanup on disconnect | V9 now returns focus/input to Windows before restarting its scrcpy child |
-| Release stuck local input before switch | One bounded event-time release check covers Ctrl/Alt/Shift and five mouse buttons; no continuous polling |
-
-## Legacy components excluded
-
-- `input-bridge.ps1`, hidden WinForms TextBox and Enter-to-send buffer.
-- 35 ms middle-button polling/hook, recording beeps and legacy timers.
-- ADBKeyboard selection and `ADB_INPUT_B64`/`ADB_INPUT_CODE` broadcasts.
-- Blind synthetic RightAlt toggles.
-- v8 tray/screenshot helper processes; functionality lives in the single v9 supervisor.
-
-Middle click is forwarded unchanged by scrcpy (`--mouse-bind=++++:++++`) and has no v9 hook.
-
-## Verification status
-
-| Test | Status | Evidence |
+| Area | Root cause | Repair |
 |---|---|---|
-| Static/native compilation | PASS | Windows PowerShell 5.1 |
-| Unit/regression suite | PASS | 16/16 |
-| VNI laptop → UHID → Fcitx | PASS | ChatGPT UI read-back: `á à ơ đ kỳ tiếng` |
-| Second Android field VNI | PASS | Chrome address field: `á ơ đ kỳ tiếng` |
-| Stateful Windows ↔ Android switches | PASS | 10/10 Android and Windows route events logged |
-| scrcpy unexpected exit | PASS | Windows route restored before supervised restart; PID changed |
-| No legacy helpers | PASS | Runtime process inventory contained only v9 launcher + its scrcpy child |
-| No ADBKeyboard takeover | PASS | Fcitx component + UniKey subtype read back; source regression guard |
-| Middle button unchanged | PASS (configuration) | no middle hook; all secondary buttons forwarded |
-| Screenshot capture pipeline | PASS | device screencap/pull PNG automated check |
-| Physical PrtScr routing/clipboard | BLOCKED | requires one real PrtScr press; synthetic Windows events do not reproduce this hardware key reliably |
-| Unicode clipboard shortcut | BLOCKED | synthetic RightAlt+V did not provide a reliable foreground-input test; existing scrcpy path was not modified |
-| Physical mouse button behavior | BLOCKED | requires observing the phone and Windows pointer |
+| Routing | V9 equated focus/internal state with scrcpy capture and exposed RightAlt | Alt+1/Alt+2 now drive a tracked scrcpy capture transition; duplicate transitions are ignored and prior Windows focus is restored |
+| Screenshot | PrtScr depended on the possibly-wrong internal route flag | Physical PrtScr is consumed only when the actual scrcpy control window is foreground; capture streams `adb exec-out screencap -p` directly to the Windows clipboard |
+| Window | Compact v8 placement was missing | Restored 180×120, top-right, always-on-top control window |
+| Cleanup | Exit could terminate while Android capture remained active | Exit/disconnect restores Windows routing before disposing owned resources |
+| Scope leak | Experimental Windows-image push remained | Removed Alt+3, its menu/config entry, and implementation |
 
-## Run and rollback
+## Architecture retained from V9
 
-Run `Android-Prompt-v9.bat`. Use Alt+1, RightAlt and Android-context PrtScr as documented in `README.md`. To roll back code, unpack the pre-integration checkpoint from the workspace `work` folder. To restore the Android IME saved during initial setup, run `restore-previous-ime.ps1`; routine v9 Exit does not replace Fcitx with another IME.
+- Android Fcitx5 + UniKey owns VNI composition; dynamic UniKey subtype selection and verification are unchanged.
+- scrcpy 4.1 UHID carries raw keyboard/mouse events (`--keyboard=uhid`, `--mouse=uhid`).
+- Single mutex/launcher/tray supervisor, bounded scrcpy restart, and native Unicode text clipboard behavior.
+
+## V8 behavior reused
+
+- Alt+1 enter, Alt+2 return, compact control window, foreground-scoped PrtScr, direct ADB screenshot stream, and previous-app focus restoration.
+- V8 stayed read-only; no history merge or legacy helper process was introduced.
+
+## Legacy excluded
+
+- Middle-button polling/hook, WinForms input box, beep/timer input workflow, ADBKeyboard broadcasts, Alt+3 image push, and separate v8 tray/screenshot/input helpers.
+
+## Verification
+
+| Test | Status | Evidence / limit |
+|---|---|---|
+| Static parse + native compile | PASS | Windows PowerShell 5.1 |
+| Host regression | PASS | 25/25 unit assertions |
+| ADB authorized, Fcitx/UniKey read-back and screenshot PNG | PASS | 6/6 device checks after launcher preflight |
+| Android 15 subtype overwrite regression | PASS | reproduced, then fixed by selecting UniKey after `ime set`; preflight read-back passed |
+| Earlier VNI laptop → UHID → Fcitx | PASS | ChatGPT and Chrome read-back; see `HOTFIX-VNI-REPORT.md` |
+| Current build routing, physical mouse, PrtScr clipboard, disconnect/reconnect, 20-cycle switching | BLOCKED | requires live user observation; API success is not counted |
+
+Branch: `fix/v8-experience-v9-vni`. Phase commits: `17e5510`, `3612770`, `284cf5e`. Production readiness is not claimed until the BLOCKED checks pass.

@@ -100,10 +100,11 @@ function Set-AndroidFcitxUniKey {
 
     $enable = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','ime','enable',$component)
     if ($enable.ExitCode -ne 0) { throw "Could not enable Fcitx5: $($enable.StdErr.Trim())" }
-    $selectSubtype = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','settings','put','secure','selected_input_method_subtype',([string]$subtypeId))
-    if ($selectSubtype.ExitCode -ne 0) { throw "Could not select Fcitx UniKey subtype: $($selectSubtype.StdErr.Trim())" }
     $selectIme = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','ime','set',$component)
     if ($selectIme.ExitCode -ne 0) { throw "Could not select Fcitx5: $($selectIme.StdErr.Trim())" }
+    # Android 15 may choose Fcitx's last-used subtype during `ime set`, so write UniKey after it.
+    $selectSubtype = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','settings','put','secure','selected_input_method_subtype',([string]$subtypeId))
+    if ($selectSubtype.ExitCode -ne 0) { throw "Could not select Fcitx UniKey subtype: $($selectSubtype.StdErr.Trim())" }
 
     $actualIme = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','settings','get','secure','default_input_method')
     $actualSubtype = Invoke-ProcessCapture $AdbPath @('-s',$Serial,'shell','settings','get','secure','selected_input_method_subtype')

@@ -4,23 +4,20 @@ using System.Windows.Forms;
 
 public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     const int WM_HOTKEY = 0x0312;
-    const int WM_CAPTURE_ANDROID = 0x8002, WM_PASTE_IMAGE = 0x8003, WH_KEYBOARD_LL = 13;
-    const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
-    const int VK_SNAPSHOT = 0x2C, VK_V = 0x56, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_RMENU = 0xA5;
+    const int WM_CAPTURE_ANDROID = 0x8002, WH_KEYBOARD_LL = 13;
+    const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
+    const int VK_SNAPSHOT = 0x2C, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_RMENU = 0xA5;
     const uint MOD_ALT = 0x0001, MOD_NOREPEAT = 0x4000;
     const int ENTER = 0x901, EXIT_ANDROID = 0x902, SEND_IMAGE = 0x903, CAPTURE = 0x904;
     public event Action EnterAndroid;
     public event Action ExitAndroid;
     public event Action SendImage;
-    public event Action PasteImage;
     public event Action CaptureAndroid;
     delegate IntPtr KeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     readonly KeyboardProc keyboardProc;
     IntPtr keyboardHook;
     IntPtr controlWindow;
     volatile bool androidActive;
-    volatile bool imageClipboardArmed;
-    bool suppressImagePasteV;
 
     [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterHotKey(IntPtr h, int id, uint mod, uint key);
     [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
@@ -53,20 +50,6 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     IntPtr KeyboardCallback(int code, IntPtr wParam, IntPtr lParam) {
         int message = wParam.ToInt32();
         int key = code >= 0 ? Marshal.ReadInt32(lParam) : 0;
-        if (code >= 0 && key == VK_V && controlWindow != IntPtr.Zero && GetForegroundWindow() == controlWindow) {
-            bool down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
-            bool up = message == WM_KEYUP || message == WM_SYSKEYUP;
-            if (down && imageClipboardArmed && (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) {
-                imageClipboardArmed = false;
-                suppressImagePasteV = true;
-                PostMessage(Handle, WM_PASTE_IMAGE, IntPtr.Zero, IntPtr.Zero);
-                return new IntPtr(1);
-            }
-            if (up && suppressImagePasteV) {
-                suppressImagePasteV = false;
-                return new IntPtr(1);
-            }
-        }
         if (code >= 0 && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
             key == VK_SNAPSHOT && controlWindow != IntPtr.Zero &&
             GetForegroundWindow() == controlWindow) {
@@ -76,7 +59,6 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
         return CallNextHookEx(keyboardHook, code, wParam, lParam);
     }
     public void SetControlWindowHandle(IntPtr handle) { controlWindow = handle; }
-    public void SetImageClipboardArmed(bool armed) { imageClipboardArmed = armed; }
     public static bool CaptureScrcpyFromReleasedState(IntPtr handle) {
         Rect rect;
         if (!IsUsableWindow(handle) || !GetClientRect(handle, out rect)) return false;
@@ -134,8 +116,6 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
             }
         } else if (m.Msg == WM_CAPTURE_ANDROID && CaptureAndroid != null) {
             CaptureAndroid();
-        } else if (m.Msg == WM_PASTE_IMAGE && PasteImage != null) {
-            PasteImage();
         }
         base.WndProc(ref m);
     }

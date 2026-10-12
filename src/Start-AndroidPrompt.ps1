@@ -164,24 +164,15 @@ function Send-WindowsImageToAndroid {
         $status = "$remoteDirectory/../status/$name.ok"
         $ack = Invoke-ProcessCapture $adb (AdbArgs @('shell','cat',$status)) 10000
         $expectedHash = (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($ack.ExitCode -ne 0 -or $ack.StdOut.Trim() -ne $expectedHash) { throw 'Android helper did not confirm an integrity-matched clipboard image.' }
+        $parts = $ack.StdOut.Trim().Split('|')
+        if ($ack.ExitCode -ne 0 -or $parts.Count -ne 3 -or $parts[0] -ne $expectedHash -or $parts[1] -notmatch '^content://media/' -or $parts[2] -notmatch '^AndroidPrompt-.+\.png$') { throw 'Android helper did not confirm an integrity-matched MediaStore image.' }
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','rm','-f',$status)))
-        $script:window.SetImageClipboardArmed($true)
-        Log "Windows image registered in Android clipboard name=$name bytes=$length sha256=$expectedHash nextCtrlV=SHARE_FALLBACK paste=UNVERIFIED" 'WARN'
+        Log "Windows image saved to Pictures/AndroidPrompt name=$($parts[2]) bytes=$length sha256=$expectedHash uri=$($parts[1])" 'PASS'
     } catch { Log "Windows image transfer failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
     finally {
         if ($image) { $image.Dispose() }
         if ($temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
     }
-}
-
-function Paste-ArmedAndroidImage {
-    try {
-        $package = 'com.androidprompt.clipboard'
-        $probe = Invoke-ProcessCapture $adb (AdbArgs @('shell','run-as',$package,'ls','-l','cache/clipboard/current.png')) 10000
-        if ($probe.ExitCode -ne 0) { throw 'Android helper image is no longer readable.' }
-        Share-LastAndroidImage
-    } catch { Log "Android image Share fallback failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
 }
 
 function Share-LastAndroidImage {
@@ -245,7 +236,6 @@ try {
     $window.add_EnterAndroid({ Enter-Android })
     $window.add_ExitAndroid({ Return-Windows })
     $window.add_SendImage({ Send-WindowsImageToAndroid })
-    $window.add_PasteImage({ Paste-ArmedAndroidImage })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })
     $tray = [Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true

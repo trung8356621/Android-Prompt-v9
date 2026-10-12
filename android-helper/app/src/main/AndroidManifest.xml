@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <application android:allowBackup="false" android:label="Android Prompt Clipboard" android:supportsRtl="true">
         <activity android:name=".BootstrapActivity" android:exported="true" android:theme="@style/NoDisplayTheme">
             <intent-filter>
@@ -15,13 +16,8 @@
         <receiver android:name=".ImageClipboardReceiver" android:exported="true" android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.androidprompt.clipboard.SET_IMAGE" />
-                <action android:name="com.androidprompt.clipboard.CLEAR_TEST" />
+                <action android:name="com.androidprompt.clipboard.DELETE_TEST" />
             </intent-filter>
         </receiver>
-        <provider
-            android:name=".ImageProvider"
-            android:authorities="com.androidprompt.clipboard.images"
-            android:exported="false"
-            android:grantUriPermissions="true" />
     </application>
 </manifest>

@@ -1,6 +1,6 @@
 # Android Prompt Clipboard helper
 
-This helper receives one image at a time over the existing ADB connection and places a `content://` URI in the Android system clipboard. It does not read or synchronize text and does not use the network.
+This helper receives images over the existing ADB connection and saves each one as a unique PNG in Android MediaStore under `Pictures/AndroidPrompt`. It does not read or synchronize clipboard text and does not use the network.
 
 Build with JDK 17, Android SDK 35 and Gradle 8.9:
 
@@ -8,4 +8,4 @@ Build with JDK 17, Android SDK 35 and Gradle 8.9:
 gradle --no-daemon :app:assembleDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk` with `adb install -r`. The v9 launcher uses Alt+3 to transfer the current Windows clipboard image. The next Ctrl+V opens Android Share for apps such as Zalo that do not accept image clipboard paste; the tray command **Share last Android image** opens the same fallback.
+Install `app/build/outputs/apk/debug/app-debug.apk` with `adb install -r`. Alt+3 saves the current Windows clipboard image without opening or focusing an Android app. In Zalo, use Attach/Image and select it from Photos. The tray command **Share last Android image** remains an optional shortcut.

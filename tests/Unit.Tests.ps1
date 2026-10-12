@@ -40,6 +40,8 @@ Assert ($launcher -match '--always-on-top' -and $launcher -match 'windowWidth = 
 Assert ($launcher -match "KEYCODE_WAKEUP") 'Android is awakened on entry'
 Assert ($launcher -match 'finally[\s\S]*IsAndroidActive[\s\S]*Return-Windows') 'shutdown restores Windows routing before cleanup'
 Assert ($launcher -notmatch 'function Return-Windows[\s\S]*?ToggleScrcpyCapture') 'Alt+2 releases capture by focus loss without RightAlt toggle'
+Assert ($native -notmatch 'ToggleScrcpyCapture|keybd_event' -and $native -match 'CaptureScrcpyFromReleasedState') 'Alt+1 uses released-state click capture without blind RightAlt toggle'
+Assert ($native -match 'first click while released' -and $launcher -match 'FOCUS_LOST') 'Alt+1 follows scrcpy released-state capture semantics'
 Assert ($launcher -match 'startup routing observation[\s\S]*action=NONE') 'startup observes routing without changing focus or capture'
 Assert ($launcher -match 'Get-WindowsFocusTarget' -and $launcher -match 'candidate -ne \$control') 'scrcpy control is never saved as Windows focus target'
 Assert ($native -match 'FocusAndVerify' -and $launcher -match 'Could not verify Windows focus') 'routing verifies foreground transitions'

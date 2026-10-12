@@ -94,13 +94,14 @@ function Enter-Android {
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','input','keyevent','KEYCODE_WAKEUP')) 5000)
         if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before switching.' }
         if (-not [AndroidPromptWindow]::FocusAndVerify($control, 1000)) { throw "Could not verify Android control focus; foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$control" }
-        # The prior non-control foreground guarantees scrcpy received FOCUS_LOST;
-        # RightAlt now requests capture from that known released state, not as a blind toggle.
-        [AndroidPromptWindow]::ToggleScrcpyCapture()
+        # The prior non-control foreground guarantees scrcpy received FOCUS_LOST.
+        # In scrcpy 4.1, the first mouse-up in that released state is consumed and enables capture.
+        Start-Sleep -Milliseconds 100
+        if (-not [AndroidPromptWindow]::CaptureScrcpyFromReleasedState($control)) { throw 'Could not request scrcpy mouse capture.' }
         $script:window.SetAndroidActive($true)
         $after = [AndroidPromptWindow]::GetForegroundWindow()
         if ($after -ne $control) { throw "Android focus was lost after capture request; foreground=$after control=$control" }
-        Log "route-enter result=ANDROID_FOREGROUND foreground=$after control=$control capture=REQUESTED_UNVERIFIABLE" 'WARN'
+        Log "route-enter result=ANDROID_FOREGROUND foreground=$after control=$control capture=CLICK_REQUESTED_UNVERIFIABLE" 'WARN'
     } catch {
         if ($script:window) { $script:window.SetAndroidActive($false) }
         Log "route-enter result=FAIL foreground=$([AndroidPromptWindow]::GetForegroundWindow()) error=$($_.Exception.Message)" 'FAIL'

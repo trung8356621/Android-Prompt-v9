@@ -25,12 +25,17 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int command);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out Rect rect);
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetWindowsHookEx(int id, KeyboardProc callback, IntPtr module, uint threadId);
     [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, int message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
-    [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
+    [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
 
     public AndroidPromptWindow() {
         CreateHandle(new CreateParams());
@@ -52,10 +57,16 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
         return CallNextHookEx(keyboardHook, code, wParam, lParam);
     }
     public void SetControlWindowHandle(IntPtr handle) { controlWindow = handle; }
-    public static void ToggleScrcpyCapture() {
-        const uint EXTENDED = 0x0001, KEYUP = 0x0002;
-        keybd_event(VK_RMENU, 0, EXTENDED, UIntPtr.Zero);
-        keybd_event(VK_RMENU, 0, EXTENDED | KEYUP, UIntPtr.Zero);
+    public static bool CaptureScrcpyFromReleasedState(IntPtr handle) {
+        Rect rect;
+        if (!IsUsableWindow(handle) || !GetClientRect(handle, out rect)) return false;
+        Point center = new Point { X = (rect.Right - rect.Left) / 2, Y = (rect.Bottom - rect.Top) / 2 };
+        if (!ClientToScreen(handle, ref center) || !SetCursorPos(center.X, center.Y)) return false;
+        // scrcpy consumes the first click while released and captures on button-up.
+        const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
+        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        return true;
     }
     public void SetAndroidActive(bool active) {
         if (androidActive == active) return;

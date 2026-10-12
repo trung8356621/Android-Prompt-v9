@@ -23,6 +23,7 @@ $tray = $null
 $previousForeground = [IntPtr]::Zero
 $exitRequested = $false
 $restartCount = 0
+$captureBusy = $false
 
 function Log([string]$message, [string]$level = 'INFO') { Write-Host (Write-V9Log -Path $log -Message $message -Level $level) }
 function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $args }
@@ -81,33 +82,33 @@ function Return-Windows {
 }
 
 function Capture-AndroidScreen {
+    if ($script:captureBusy) { return }
+    $script:captureBusy = $true
+    $process = $null; $memory = $null; $source = $null; $bitmap = $null
     try {
-        $temp = Join-Path ([IO.Path]::GetTempPath()) ("android-prompt-v9-capture-{0}.png" -f [guid]::NewGuid().ToString('N'))
-        try {
-            # Use adb pull through a temporary Android file; stdout capture is text-oriented.
-            $remote = '/data/local/tmp/android-prompt-v9.png'
-            $shot = Invoke-ProcessCapture $adb (AdbArgs @('shell','screencap','-p',$remote))
-            if ($shot.ExitCode -ne 0) { throw $shot.StdErr }
-            $pull = Invoke-ProcessCapture $adb (AdbArgs @('pull',$remote,$temp)) 30000
-            [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','rm','-f',$remote)))
-            if ($pull.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $temp)) { throw $pull.StdErr }
-            $bitmap = [Drawing.Bitmap]::FromFile($temp)
-            try {
-                $clipboardCopy = [Drawing.Bitmap]::new($bitmap)
-                try {
-                    $copied = $false
-                    for ($attempt = 1; $attempt -le 10 -and -not $copied; $attempt++) {
-                        try {
-                            [Windows.Forms.Clipboard]::SetImage($clipboardCopy)
-                            $copied = [Windows.Forms.Clipboard]::ContainsImage()
-                        } catch { if ($attempt -eq 10) { throw }; Start-Sleep -Milliseconds 120 }
-                    }
-                    if (-not $copied) { throw 'Windows clipboard did not confirm the Android screenshot.' }
-                } finally { $clipboardCopy.Dispose() }
-            } finally { $bitmap.Dispose() }
-            Log 'Android screenshot copied to Windows clipboard' 'PASS'
-        } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        $psi = [Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $adb; $psi.Arguments = "-s $($script:device.Serial) exec-out screencap -p"
+        $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::new(); $process.StartInfo = $psi
+        $memory = [IO.MemoryStream]::new(); [void]$process.Start()
+        $process.StandardOutput.BaseStream.CopyTo($memory)
+        $errorText = $process.StandardError.ReadToEnd(); $process.WaitForExit()
+        if ($process.ExitCode -ne 0 -or $memory.Length -eq 0) { throw "ADB screencap failed: $errorText" }
+        $memory.Position = 0; $source = [Drawing.Image]::FromStream($memory); $bitmap = [Drawing.Bitmap]::new($source)
+        $copied = $false
+        for ($attempt = 1; $attempt -le 10 -and -not $copied; $attempt++) {
+            try { [Windows.Forms.Clipboard]::SetImage($bitmap); $copied = [Windows.Forms.Clipboard]::ContainsImage() }
+            catch { if ($attempt -eq 10) { throw }; Start-Sleep -Milliseconds 120 }
+        }
+        if (-not $copied) { throw 'Windows clipboard did not confirm the Android screenshot.' }
+        Log 'Android screenshot copied to Windows clipboard' 'PASS'
     } catch { Log $_.Exception.Message 'FAIL'; [Console]::Beep(350,120) }
+    finally {
+        if ($bitmap) { $bitmap.Dispose() }; if ($source) { $source.Dispose() }
+        if ($memory) { $memory.Dispose() }; if ($process) { $process.Dispose() }
+        $script:captureBusy = $false
+    }
 }
 
 try {
@@ -126,6 +127,7 @@ try {
 
     $scrcpyProcess = Start-ControlSession
     $window = [AndroidPromptWindow]::new()
+    $window.SetControlWindowHandle($scrcpyProcess.MainWindowHandle)
     $window.add_EnterAndroid({ Enter-Android })
     $window.add_ExitAndroid({ Return-Windows })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })
@@ -148,7 +150,10 @@ try {
             }
             if ($config.autoRestart -and $script:restartCount -lt $config.maxRestartAttempts) {
                 $script:restartCount++; Log "scrcpy stopped; restart $($script:restartCount)/$($config.maxRestartAttempts)" 'WARN'
-                try { $script:scrcpyProcess.Dispose(); $script:scrcpyProcess = Start-ControlSession } catch { Log $_.Exception.Message 'FAIL' }
+                try {
+                    $script:scrcpyProcess.Dispose(); $script:scrcpyProcess = Start-ControlSession
+                    $script:window.SetControlWindowHandle($script:scrcpyProcess.MainWindowHandle)
+                } catch { Log $_.Exception.Message 'FAIL' }
             } else { Log 'scrcpy stopped; restart limit reached' 'FAIL'; [Windows.Forms.Application]::Exit() }
         }
     })

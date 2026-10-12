@@ -26,7 +26,9 @@ Assert ((Get-FcitxUniKeySubtypeIdFromDump $fixture) -eq -840535185) 'parses expl
 try { Get-FcitxUniKeySubtypeIdFromDump 'mSubtypeNameOverride=English mSubtypeId=1'; Assert $false 'rejects missing UniKey subtype' } catch { Assert $true 'rejects missing UniKey subtype' }
 $native = Get-Content -Raw (Join-Path $root 'src\NativeWindow.cs')
 $launcher = Get-Content -Raw (Join-Path $root 'src\Start-AndroidPrompt.ps1')
-Assert ($native -match 'VK_SNAPSHOT' -and $native -match 'androidActive') 'PrtScr is scoped to Android routing state'
+Assert ($native -match 'VK_SNAPSHOT' -and $native -match 'GetForegroundWindow\(\) == controlWindow') 'PrtScr is scoped to foreground Android control window'
+Assert ($native -match 'return new IntPtr\(1\)') 'Android PrtScr is consumed before Windows capture'
+Assert ($launcher -match 'exec-out screencap -p') 'screenshot streams directly from Android'
 Assert ($native -notmatch 'VK_MBUTTON|WH_MOUSE') 'no middle-mouse input hook'
 Assert ($launcher -notmatch 'input-bridge|ADB_INPUT|AdbIME|TextBox') 'no legacy chatbox or ADBKeyboard input'
 Assert ($config.scrcpyArguments -contains '--mouse-bind=++++:++++') 'middle click forwards normally to Android'

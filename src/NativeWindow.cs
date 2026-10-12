@@ -4,17 +4,18 @@ using System.Windows.Forms;
 
 public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     const int WM_HOTKEY = 0x0312;
-    const int WH_KEYBOARD_LL = 13;
+    const int WM_CAPTURE_ANDROID = 0x8002, WH_KEYBOARD_LL = 13;
     const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
     const int VK_SNAPSHOT = 0x2C, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_RMENU = 0xA5;
     const uint MOD_ALT = 0x0001, MOD_NOREPEAT = 0x4000;
-    const int ENTER = 0x901, EXIT_ANDROID = 0x902, CAPTURE = 0x903, SCREENSHOT = 0x904;
+    const int ENTER = 0x901, EXIT_ANDROID = 0x902, CAPTURE = 0x903;
     public event Action EnterAndroid;
     public event Action ExitAndroid;
     public event Action CaptureAndroid;
     delegate IntPtr KeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     readonly KeyboardProc keyboardProc;
     IntPtr keyboardHook;
+    IntPtr controlWindow;
     volatile bool androidActive;
 
     [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterHotKey(IntPtr h, int id, uint mod, uint key);
@@ -39,8 +40,16 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
         } catch { Dispose(); throw; }
     }
     IntPtr KeyboardCallback(int code, IntPtr wParam, IntPtr lParam) {
+        int message = wParam.ToInt32();
+        if (code >= 0 && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
+            Marshal.ReadInt32(lParam) == VK_SNAPSHOT && controlWindow != IntPtr.Zero &&
+            GetForegroundWindow() == controlWindow) {
+            PostMessage(Handle, WM_CAPTURE_ANDROID, IntPtr.Zero, IntPtr.Zero);
+            return new IntPtr(1);
+        }
         return CallNextHookEx(keyboardHook, code, wParam, lParam);
     }
+    public void SetControlWindowHandle(IntPtr handle) { controlWindow = handle; }
     public static void ToggleScrcpyCapture() {
         const uint EXTENDED = 0x0001, KEYUP = 0x0002;
         keybd_event(VK_RMENU, 0, EXTENDED, UIntPtr.Zero);
@@ -48,15 +57,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     }
     public void SetAndroidActive(bool active) {
         if (androidActive == active) return;
-        if (active) {
-            if (!RegisterHotKey(Handle, SCREENSHOT, MOD_NOREPEAT, VK_SNAPSHOT) &&
-                !RegisterHotKey(Handle, SCREENSHOT, 0, VK_SNAPSHOT))
-                throw new InvalidOperationException("Cannot reserve PrtScr for Android capture.");
-            androidActive = true;
-        } else {
-            androidActive = false;
-            UnregisterHotKey(Handle, SCREENSHOT);
-        }
+        androidActive = active;
     }
     public bool IsAndroidActive { get { return androidActive; } }
     public static bool WaitForLocalInputRelease(int timeoutMilliseconds) {
@@ -86,8 +87,9 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
                 case ENTER: if (EnterAndroid != null) EnterAndroid(); break;
                 case EXIT_ANDROID: if (ExitAndroid != null) ExitAndroid(); break;
                 case CAPTURE: if (CaptureAndroid != null) CaptureAndroid(); break;
-                case SCREENSHOT: if (androidActive && CaptureAndroid != null) CaptureAndroid(); break;
             }
+        } else if (m.Msg == WM_CAPTURE_ANDROID && CaptureAndroid != null) {
+            CaptureAndroid();
         }
         base.WndProc(ref m);
     }
@@ -95,7 +97,6 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
         if (Handle != IntPtr.Zero) {
             if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
             UnregisterHotKey(Handle, ENTER); UnregisterHotKey(Handle, EXIT_ANDROID); UnregisterHotKey(Handle, CAPTURE);
-            UnregisterHotKey(Handle, SCREENSHOT);
             DestroyHandle();
         }
     }

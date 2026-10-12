@@ -30,6 +30,9 @@ Assert ($native -match 'VK_SNAPSHOT' -and $native -match 'androidActive') 'PrtSc
 Assert ($native -notmatch 'VK_MBUTTON|WH_MOUSE') 'no middle-mouse input hook'
 Assert ($launcher -notmatch 'input-bridge|ADB_INPUT|AdbIME|TextBox') 'no legacy chatbox or ADBKeyboard input'
 Assert ($config.scrcpyArguments -contains '--mouse-bind=++++:++++') 'middle click forwards normally to Android'
+Assert ($native -match 'Register\(EXIT_ANDROID, 0x32\)') 'Alt+2 return hotkey registered'
+Assert ($launcher -match 'duplicate Alt\+1 ignored' -and $launcher -match 'duplicate Alt\+2 ignored') 'routing switches are idempotent'
+Assert ($native -notmatch 'PUSH_IMAGE|PushImage' -and $launcher -notmatch 'Push-WindowsImage|clipboard image \(Alt\+3\)' -and -not $config.PSObject.Properties['pushImageHotkey']) 'Windows image push removed'
 
 if ($failures.Count) { throw "$($failures.Count) unit test(s) failed: $($failures -join ', ')" }
 Write-Host "PASS: $passes unit tests"

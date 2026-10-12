@@ -50,44 +50,34 @@ function Start-ControlSession {
 
 function Enter-Android {
     try {
+        if ($script:window.IsAndroidActive) { Log 'routing already ANDROID; duplicate Alt+1 ignored'; return }
         if ($null -eq $script:scrcpyProcess -or $script:scrcpyProcess.HasExited) { throw 'Control session is not running.' }
         $script:previousForeground = [AndroidPromptWindow]::GetForegroundWindow()
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','input','keyevent','KEYCODE_WAKEUP')) 5000)
         if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before switching.' }
         $script:scrcpyProcess.Refresh()
         if (-not [AndroidPromptWindow]::Focus($script:scrcpyProcess.MainWindowHandle)) { throw 'Windows refused to focus the control window.' }
+        [AndroidPromptWindow]::ToggleScrcpyCapture()
         $script:window.SetAndroidActive($true)
-        Log 'routing=ANDROID; RightAlt releases UHID and returns to the previous Windows app' 'PASS'
+        Log 'routing=ANDROID; Alt+2 returns to the previous Windows app' 'PASS'
     } catch { Log $_.Exception.Message 'FAIL'; [Console]::Beep(350,120) }
 }
 
 function Return-Windows {
     try {
-        if ($script:window) { $script:window.SetAndroidActive($false) }
+        if (-not $script:window -or -not $script:window.IsAndroidActive) { Log 'routing already WINDOWS; duplicate Alt+2 ignored'; return }
+        if ($script:scrcpyProcess -and -not $script:scrcpyProcess.HasExited) {
+            $script:scrcpyProcess.Refresh()
+            if ([AndroidPromptWindow]::Focus($script:scrcpyProcess.MainWindowHandle)) {
+                [AndroidPromptWindow]::ToggleScrcpyCapture()
+            }
+        }
+        $script:window.SetAndroidActive($false)
         if ($script:previousForeground -ne [IntPtr]::Zero) {
             [void][AndroidPromptWindow]::Focus($script:previousForeground)
-            Log 'routing=WINDOWS via RightAlt' 'PASS'
         }
+        Log 'routing=WINDOWS via Alt+2' 'PASS'
     } catch { Log $_.Exception.Message 'WARN' }
-}
-
-function Push-WindowsImage {
-    try {
-        if (-not [Windows.Forms.Clipboard]::ContainsImage()) { throw 'Windows clipboard does not contain an image.' }
-        $image = [Windows.Forms.Clipboard]::GetImage()
-        $temp = Join-Path ([IO.Path]::GetTempPath()) ("android-prompt-v9-{0}.png" -f [guid]::NewGuid().ToString('N'))
-        try {
-            $image.Save($temp, [Drawing.Imaging.ImageFormat]::Png)
-            $remote = "/sdcard/Pictures/AndroidPrompt/apv9-$((Get-Date).ToString('yyyyMMdd-HHmmss')).png"
-            $mkdir = Invoke-ProcessCapture $adb (AdbArgs @('shell','mkdir','-p','/sdcard/Pictures/AndroidPrompt'))
-            if ($mkdir.ExitCode -ne 0) { throw $mkdir.StdErr }
-            $push = Invoke-ProcessCapture $adb (AdbArgs @('push',$temp,$remote)) 60000
-            if ($push.ExitCode -ne 0) { throw $push.StdErr }
-            [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','am','broadcast','-a','android.intent.action.MEDIA_SCANNER_SCAN_FILE','-d',"file://$remote")))
-            Log "Windows image imported to Android gallery: $remote" 'PASS'
-            [Windows.Forms.MessageBox]::Show("Ảnh đã vào Gallery:`r`n$remote`r`n`r`nTrong ứng dụng Android, chọn Attach/Gallery.",'Android Prompt v9') | Out-Null
-        } finally { if ($image) { $image.Dispose() }; Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
-    } catch { Log $_.Exception.Message 'FAIL'; [Console]::Beep(350,120) }
 }
 
 function Capture-AndroidScreen {
@@ -137,14 +127,13 @@ try {
     $scrcpyProcess = Start-ControlSession
     $window = [AndroidPromptWindow]::new()
     $window.add_EnterAndroid({ Enter-Android })
-    $window.add_PushImage({ Push-WindowsImage })
+    $window.add_ExitAndroid({ Return-Windows })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })
-    $window.add_ReturnWindows({ Return-Windows })
     $tray = [Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true
     $menu = [Windows.Forms.ContextMenuStrip]::new()
     [void]$menu.Items.Add('Enter Android (Alt+1)', $null, { Enter-Android })
-    [void]$menu.Items.Add('Push clipboard image (Alt+3)', $null, { Push-WindowsImage })
+    [void]$menu.Items.Add('Return to Windows (Alt+2)', $null, { Return-Windows })
     [void]$menu.Items.Add('Capture Android (Alt+4)', $null, { Capture-AndroidScreen })
     [void]$menu.Items.Add('-')
     [void]$menu.Items.Add('Exit', $null, { $script:exitRequested = $true; [Windows.Forms.Application]::Exit() })
@@ -163,7 +152,7 @@ try {
             } else { Log 'scrcpy stopped; restart limit reached' 'FAIL'; [Windows.Forms.Application]::Exit() }
         }
     })
-    $timer.Start(); Log 'ready: Alt+1 Android, RightAlt Windows, PrtScr Android screenshot' 'PASS'
+    $timer.Start(); Log 'ready: Alt+1 Android, Alt+2 Windows, PrtScr Android screenshot' 'PASS'
     [Windows.Forms.Application]::Run()
 } catch {
     Log $_.Exception.Message 'FAIL'

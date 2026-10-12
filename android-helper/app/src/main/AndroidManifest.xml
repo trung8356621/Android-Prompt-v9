@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="false" android:label="Android Prompt Clipboard" android:supportsRtl="true">
+        <activity android:name=".BootstrapActivity" android:exported="true" android:theme="@style/NoDisplayTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".ImageClipboardReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.androidprompt.clipboard.SET_IMAGE" />
+                <action android:name="com.androidprompt.clipboard.SHARE_LAST" />
+            </intent-filter>
+        </receiver>
+        <provider
+            android:name=".ImageProvider"
+            android:authorities="com.androidprompt.clipboard.images"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

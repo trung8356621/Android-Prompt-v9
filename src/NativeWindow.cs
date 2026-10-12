@@ -8,9 +8,10 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
     const int VK_SNAPSHOT = 0x2C, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_RMENU = 0xA5;
     const uint MOD_ALT = 0x0001, MOD_NOREPEAT = 0x4000;
-    const int ENTER = 0x901, EXIT_ANDROID = 0x902, CAPTURE = 0x903;
+    const int ENTER = 0x901, EXIT_ANDROID = 0x902, SEND_IMAGE = 0x903, CAPTURE = 0x904;
     public event Action EnterAndroid;
     public event Action ExitAndroid;
+    public event Action SendImage;
     public event Action CaptureAndroid;
     delegate IntPtr KeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     readonly KeyboardProc keyboardProc;
@@ -40,7 +41,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     public AndroidPromptWindow() {
         CreateHandle(new CreateParams());
         try {
-            Register(ENTER, 0x31); Register(EXIT_ANDROID, 0x32); Register(CAPTURE, 0x34);
+            Register(ENTER, 0x31); Register(EXIT_ANDROID, 0x32); Register(SEND_IMAGE, 0x33); Register(CAPTURE, 0x34);
             keyboardProc = KeyboardCallback;
             keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, IntPtr.Zero, 0);
             if (keyboardHook == IntPtr.Zero) throw new InvalidOperationException("Cannot install keyboard hook.");
@@ -109,6 +110,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
             switch (m.WParam.ToInt32()) {
                 case ENTER: if (EnterAndroid != null) EnterAndroid(); break;
                 case EXIT_ANDROID: if (ExitAndroid != null) ExitAndroid(); break;
+                case SEND_IMAGE: if (SendImage != null) SendImage(); break;
                 case CAPTURE: if (CaptureAndroid != null) CaptureAndroid(); break;
             }
         } else if (m.Msg == WM_CAPTURE_ANDROID && CaptureAndroid != null) {
@@ -119,7 +121,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     public void Dispose() {
         if (Handle != IntPtr.Zero) {
             if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
-            UnregisterHotKey(Handle, ENTER); UnregisterHotKey(Handle, EXIT_ANDROID); UnregisterHotKey(Handle, CAPTURE);
+            UnregisterHotKey(Handle, ENTER); UnregisterHotKey(Handle, EXIT_ANDROID); UnregisterHotKey(Handle, SEND_IMAGE); UnregisterHotKey(Handle, CAPTURE);
             DestroyHandle();
         }
     }

@@ -21,12 +21,26 @@ $scrcpyProcess = $null
 $window = $null
 $tray = $null
 $previousForeground = [IntPtr]::Zero
+$startupForeground = [IntPtr]::Zero
 $exitRequested = $false
 $restartCount = 0
 $captureBusy = $false
 
 function Log([string]$message, [string]$level = 'INFO') { Write-Host (Write-V9Log -Path $log -Message $message -Level $level) }
 function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $args }
+
+function Get-ControlHandle {
+    if ($null -eq $script:scrcpyProcess -or $script:scrcpyProcess.HasExited) { return [IntPtr]::Zero }
+    $script:scrcpyProcess.Refresh()
+    return $script:scrcpyProcess.MainWindowHandle
+}
+
+function Get-WindowsFocusTarget([IntPtr]$control) {
+    foreach ($candidate in @($script:previousForeground, $script:startupForeground, [AndroidPromptWindow]::GetShellWindow())) {
+        if ($candidate -ne $control -and [AndroidPromptWindow]::IsUsableWindow($candidate)) { return $candidate }
+    }
+    return [IntPtr]::Zero
+}
 
 function Start-ControlSession {
     $arguments = @($config.scrcpyArguments)
@@ -61,34 +75,65 @@ function Start-ControlSession {
 
 function Enter-Android {
     try {
-        if ($script:window.IsAndroidActive) { Log 'routing already ANDROID; duplicate Alt+1 ignored'; return }
         if ($null -eq $script:scrcpyProcess -or $script:scrcpyProcess.HasExited) { throw 'Control session is not running.' }
-        $script:previousForeground = [AndroidPromptWindow]::GetForegroundWindow()
+        $control = Get-ControlHandle
+        $before = [AndroidPromptWindow]::GetForegroundWindow()
+        $trackedBefore = $script:window.IsAndroidActive
+        Log "route-enter begin foreground=$before control=$control trackedAndroid=$trackedBefore"
+        if ($control -eq [IntPtr]::Zero) { throw 'Control session has no window.' }
+        if ($before -eq $control) {
+            $script:window.SetAndroidActive($true)
+            Log "route-enter result=ANDROID_FOREGROUND foreground=$before control=$control capture=UNVERIFIED reason=already-foreground" 'WARN'
+            return
+        }
+        if ([AndroidPromptWindow]::IsUsableWindow($before)) { $script:previousForeground = $before }
+        if ($trackedBefore) {
+            $script:window.SetAndroidActive($false)
+            Log 'route-enter reconciled stale trackedAndroid=true because control was not foreground' 'WARN'
+        }
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','input','keyevent','KEYCODE_WAKEUP')) 5000)
         if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before switching.' }
-        $script:scrcpyProcess.Refresh()
-        if (-not [AndroidPromptWindow]::Focus($script:scrcpyProcess.MainWindowHandle)) { throw 'Windows refused to focus the control window.' }
+        if (-not [AndroidPromptWindow]::FocusAndVerify($control, 1000)) { throw "Could not verify Android control focus; foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$control" }
+        # The prior non-control foreground guarantees scrcpy received FOCUS_LOST;
+        # RightAlt now requests capture from that known released state, not as a blind toggle.
         [AndroidPromptWindow]::ToggleScrcpyCapture()
         $script:window.SetAndroidActive($true)
-        Log 'routing=ANDROID; Alt+2 returns to the previous Windows app' 'PASS'
-    } catch { Log $_.Exception.Message 'FAIL'; [Console]::Beep(350,120) }
+        $after = [AndroidPromptWindow]::GetForegroundWindow()
+        if ($after -ne $control) { throw "Android focus was lost after capture request; foreground=$after control=$control" }
+        Log "route-enter result=ANDROID_FOREGROUND foreground=$after control=$control capture=REQUESTED_UNVERIFIABLE" 'WARN'
+    } catch {
+        if ($script:window) { $script:window.SetAndroidActive($false) }
+        Log "route-enter result=FAIL foreground=$([AndroidPromptWindow]::GetForegroundWindow()) error=$($_.Exception.Message)" 'FAIL'
+        [Console]::Beep(350,120)
+    }
 }
 
 function Return-Windows {
     try {
-        if (-not $script:window -or -not $script:window.IsAndroidActive) { Log 'routing already WINDOWS; duplicate Alt+2 ignored'; return }
-        if ($script:scrcpyProcess -and -not $script:scrcpyProcess.HasExited) {
-            $script:scrcpyProcess.Refresh()
-            if ([AndroidPromptWindow]::Focus($script:scrcpyProcess.MainWindowHandle)) {
-                [AndroidPromptWindow]::ToggleScrcpyCapture()
-            }
+        if (-not $script:window) { throw 'Routing window is unavailable.' }
+        $control = Get-ControlHandle
+        $before = [AndroidPromptWindow]::GetForegroundWindow()
+        $trackedBefore = $script:window.IsAndroidActive
+        Log "route-exit begin foreground=$before control=$control trackedAndroid=$trackedBefore"
+        if ($control -eq [IntPtr]::Zero -or $before -ne $control) {
+            $script:window.SetAndroidActive($false)
+            Log "route-exit result=WINDOWS_VERIFIED foreground=$before control=$control reason=control-not-foreground" 'PASS'
+            return
         }
+        $target = Get-WindowsFocusTarget $control
+        if ($target -eq [IntPtr]::Zero) { throw 'No valid Windows focus target is available.' }
+        if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before returning to Windows.' }
+        if (-not [AndroidPromptWindow]::FocusAndVerify($target, 1000)) {
+            throw "Could not verify Windows focus; foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$control target=$target"
+        }
+        $after = [AndroidPromptWindow]::GetForegroundWindow()
+        if ($after -eq $control) { throw "Control window still owns foreground after Alt+2; control=$control target=$target" }
         $script:window.SetAndroidActive($false)
-        if ($script:previousForeground -ne [IntPtr]::Zero) {
-            [void][AndroidPromptWindow]::Focus($script:previousForeground)
-        }
-        Log 'routing=WINDOWS via Alt+2' 'PASS'
-    } catch { Log $_.Exception.Message 'WARN' }
+        Log "route-exit result=WINDOWS_VERIFIED foreground=$after control=$control target=$target focusLostRelease=EXPECTED" 'PASS'
+    } catch {
+        Log "route-exit result=FAIL foreground=$([AndroidPromptWindow]::GetForegroundWindow()) error=$($_.Exception.Message)" 'FAIL'
+        [Console]::Beep(350,120)
+    }
 }
 
 function Capture-AndroidScreen {
@@ -135,9 +180,11 @@ try {
     Log "Fcitx5 + UniKey selected explicitly: subtype=$($fcitxSelection.SubtypeId)" 'PASS'
     if ($PreflightOnly) { Log 'preflight completed' 'PASS'; exit 0 }
 
+    $startupForeground = [AndroidPromptWindow]::GetForegroundWindow()
     $scrcpyProcess = Start-ControlSession
     $window = [AndroidPromptWindow]::new()
     $window.SetControlWindowHandle($scrcpyProcess.MainWindowHandle)
+    Log "startup routing observation foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$($scrcpyProcess.MainWindowHandle) preStartForeground=$startupForeground action=NONE"
     $window.add_EnterAndroid({ Enter-Android })
     $window.add_ExitAndroid({ Return-Windows })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })

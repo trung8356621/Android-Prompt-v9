@@ -21,6 +21,8 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterHotKey(IntPtr h, int id, uint mod, uint key);
     [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int command);
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetWindowsHookEx(int id, KeyboardProc callback, IntPtr module, uint threadId);
@@ -60,6 +62,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
         androidActive = active;
     }
     public bool IsAndroidActive { get { return androidActive; } }
+    public static bool IsUsableWindow(IntPtr handle) { return handle != IntPtr.Zero && IsWindow(handle); }
     public static bool WaitForLocalInputRelease(int timeoutMilliseconds) {
         int[] keys = { VK_SHIFT, VK_CONTROL, VK_MENU, 0x01, 0x02, 0x04, 0x05, 0x06 };
         DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
@@ -77,9 +80,18 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
             throw new InvalidOperationException("Cannot register Alt+" + (char)key + "; another app owns it.");
     }
     public static bool Focus(IntPtr handle) {
-        if (handle == IntPtr.Zero) return false;
+        if (!IsUsableWindow(handle)) return false;
         ShowWindow(handle, 4);
         return SetForegroundWindow(handle);
+    }
+    public static bool FocusAndVerify(IntPtr handle, int timeoutMilliseconds) {
+        if (!Focus(handle)) return false;
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);
+        do {
+            if (GetForegroundWindow() == handle) return true;
+            System.Threading.Thread.Sleep(10);
+        } while (DateTime.UtcNow < deadline);
+        return false;
     }
     protected override void WndProc(ref Message m) {
         if (m.Msg == WM_HOTKEY) {

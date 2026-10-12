@@ -2,7 +2,7 @@
 
 ## Implemented architecture
 
-Windows owns lifecycle, explicit entry hotkey, logging, image transfer and recovery. Official scrcpy 4.1 provides UHID keyboard/mouse and Unicode text clipboard transport. Android Fcitx5 + UniKey owns Vietnamese VNI composition. V9 never selects ADBKeyboard, transforms Vietnamese text on Windows, or changes persistent Android input settings.
+Windows owns lifecycle, explicit routing hotkeys, logging, Android screenshots and recovery. Official scrcpy 4.1 provides UHID keyboard/mouse and Unicode text clipboard transport. Android Fcitx5 + UniKey owns Vietnamese VNI composition. V9 never selects ADBKeyboard or transforms Vietnamese text on Windows.
 
 This replaces v8's WinForms prompt, 35 ms middle-button polling, broadcast text injection, blind RightAlt `SendInput`, and forced IME mutation. V8 was cloned only to `work/Android-Prompt-v8-readonly` for audit and was not modified.
 
@@ -12,10 +12,10 @@ This replaces v8's WinForms prompt, 35 ms middle-button polling, broadcast text 
 |---|---|---|
 | Direct English/VNI input architecture | IMPLEMENTED, DEVICE BLOCKED | Fcitx project documents VNI and physical-keyboard support; target handset required |
 | Explicit Windows → Android route | IMPLEMENTED | Alt+1 focuses supervised UHID session |
-| Android → Windows release | IMPLEMENTED | Native scrcpy RightAlt capture release; Alt+Tab changes app |
+| Android → Windows release | IMPLEMENTED, DEVICE BLOCKED | Alt+2 releases tracked scrcpy capture and restores prior focus |
 | No duplicate Windows composition | IMPLEMENTED | No text bridge; raw UHID only |
 | Unicode text clipboard | IMPLEMENTED, DEVICE BLOCKED | scrcpy native text synchronization |
-| Windows image → Android | IMPLEMENTED | PNG import into Gallery; app attachment remains app-specific |
+| Windows image → Android | OUT OF SCOPE | Alt+3 image push removed |
 | Android image → Windows | IMPLEMENTED | Lossless physical-screen PNG capture |
 | Arbitrary Android clipboard image → Windows | NOT AVAILABLE | Android/scrcpy clipboard is plain text; screenshot is the reliable fallback |
 | Disconnect/process recovery | IMPLEMENTED | supervised restart limit and owned-child cleanup |

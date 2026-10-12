@@ -38,7 +38,7 @@ $result.manual = @(
     @{name="routing switch x$SwitchIterations; Antigravity focus; chat focus; no duplicate/stuck modifiers";status='REQUIRES_HUMAN_OBSERVATION'},
     @{name='left/right/middle click and scroll';status='REQUIRES_HUMAN_OBSERVATION'},
     @{name='Unicode clipboard both directions and no loop';status='REQUIRES_HUMAN_OBSERVATION'},
-    @{name='Windows PNG/JPEG/Snipping Tool import and Android app attachment';status='REQUIRES_HUMAN_OBSERVATION'},
+    @{name='Android PrtScr to Windows clipboard, plus normal Windows PrtScr';status='REQUIRES_HUMAN_OBSERVATION'},
     @{name='lock/unlock, USB disconnect/reconnect, helper restart, abrupt exit';status='REQUIRES_HUMAN_OBSERVATION'},
     @{name="continuous use ${StabilityMinutes} minutes";status='REQUIRES_HUMAN_OBSERVATION'}
 )

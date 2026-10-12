@@ -38,6 +38,8 @@ Assert ($native -notmatch 'PUSH_IMAGE|PushImage' -and $launcher -notmatch 'Push-
 Assert ($launcher -match '--always-on-top' -and $launcher -match 'windowWidth = 180' -and $launcher -match 'windowHeight = 120') 'compact always-on-top control window configured'
 Assert ($launcher -match "KEYCODE_WAKEUP") 'Android is awakened on entry'
 Assert ($launcher -match 'finally[\s\S]*IsAndroidActive[\s\S]*Return-Windows') 'shutdown restores Windows routing before cleanup'
+$core = Get-Content -Raw (Join-Path $root 'src\AndroidPrompt.Core.psm1')
+Assert ($core.IndexOf("'ime','set'") -lt $core.IndexOf("'settings','put','secure','selected_input_method_subtype'")) 'UniKey subtype is selected after Android IME switch'
 
 if ($failures.Count) { throw "$($failures.Count) unit test(s) failed: $($failures -join ', ')" }
 Write-Host "PASS: $passes unit tests"

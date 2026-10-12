@@ -1,0 +1,28 @@
+# Runtime logs and device-specific state
+logs/
+
+# Third-party scrcpy/ADB runtime installed by install.ps1
+tools/
+
+# Packaged deliverables and archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# PowerShell temporary/module artifacts
+*.tmp
+*.temp
+*.log
+*.clixml
+
+# IDE and OS metadata
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+.DS_Store
+

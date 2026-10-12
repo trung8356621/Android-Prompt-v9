@@ -1,0 +1,21 @@
+{
+  "deviceSerial": "",
+  "enterHotkey": "Alt+1",
+  "pushImageHotkey": "Alt+3",
+  "captureScreenHotkey": "Alt+4",
+  "returnKey": "RightAlt",
+  "autoRestart": true,
+  "maxRestartAttempts": 5,
+  "restartDelaySeconds": 2,
+  "scrcpyArguments": [
+    "--no-video",
+    "--no-audio",
+    "--mouse=uhid",
+    "--keyboard=uhid",
+    "--mouse-bind=++++:++++",
+    "--shortcut-mod=ralt",
+    "--stay-awake",
+    "--no-power-on",
+    "--window-title=Android Prompt v9 Control"
+  ]
+}

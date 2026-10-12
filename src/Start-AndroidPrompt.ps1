@@ -7,6 +7,7 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'AndroidPrompt.Core.psm1') -Force
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeWindow.cs') -ReferencedAssemblies System.Windows.Forms.dll
+Add-Type -Path (Join-Path $PSScriptRoot 'ImageTransferWorker.cs') -ReferencedAssemblies System.Windows.Forms.dll,System.Drawing.dll
 
 $config = Get-Content -Raw (Join-Path $root 'config.json') | ConvertFrom-Json
 $logDirectory = Join-Path $root 'logs'
@@ -25,8 +26,9 @@ $startupForeground = [IntPtr]::Zero
 $exitRequested = $false
 $restartCount = 0
 $captureBusy = $false
+$imageTransfer = $null
 
-function Log([string]$message, [string]$level = 'INFO') { Write-Host (Write-V9Log -Path $log -Message $message -Level $level) }
+function Log([string]$message, [string]$level = 'INFO') { try { [void](Write-V9Log -Path $log -Message $message -Level $level) } catch {} }
 function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $args }
 
 function Get-ControlHandle {
@@ -138,50 +140,7 @@ function Return-Windows {
 }
 
 function Send-WindowsImageToAndroid {
-    $temp = $null; $image = $null
-    try {
-        if ([Windows.Forms.Clipboard]::ContainsImage()) {
-            $image = [Windows.Forms.Clipboard]::GetImage()
-        } elseif ([Windows.Forms.Clipboard]::ContainsFileDropList()) {
-            $files = [Windows.Forms.Clipboard]::GetFileDropList()
-            if ($files.Count -ne 1 -or [IO.Path]::GetExtension($files[0]) -notmatch '^\.(png|jpe?g)$') { throw 'Windows clipboard must contain one PNG or JPEG image.' }
-            $image = [Drawing.Image]::FromFile($files[0])
-        } else { throw 'Windows clipboard does not contain an image.' }
-        if ($null -eq $image -or $image.Width -lt 1 -or $image.Height -lt 1) { throw 'Windows clipboard image is empty.' }
-        $name = "clip-$([guid]::NewGuid().ToString('N')).png"
-        $temp = Join-Path ([IO.Path]::GetTempPath()) $name
-        $image.Save($temp, [Drawing.Imaging.ImageFormat]::Png)
-        $length = (Get-Item -LiteralPath $temp).Length
-        if ($length -gt 20MB) { throw "Clipboard image is too large after PNG encoding: $length bytes (limit 20 MB)." }
-        $package = 'com.androidprompt.clipboard'
-        $remoteDirectory = "/sdcard/Android/data/$package/files/incoming"
-        $mkdir = Invoke-ProcessCapture $adb (AdbArgs @('shell','mkdir','-p',$remoteDirectory))
-        if ($mkdir.ExitCode -ne 0) { throw "Could not prepare Android helper storage: $($mkdir.StdErr.Trim())" }
-        $push = Invoke-ProcessCapture $adb (AdbArgs @('push',$temp,"$remoteDirectory/$name")) 60000
-        if ($push.ExitCode -ne 0) { throw "Image transfer failed: $($push.StdErr.Trim())" }
-        $broadcast = Invoke-ProcessCapture $adb (AdbArgs @('shell','am','broadcast','--receiver-include-background','-n',"$package/.ImageClipboardReceiver",'-a',"$package.SET_IMAGE",'--es','filename',$name,'--es','mime','image/png')) 30000
-        if ($broadcast.ExitCode -ne 0) { throw "Android helper rejected image: $($broadcast.StdErr.Trim())" }
-        $status = "$remoteDirectory/../status/$name.ok"
-        $ack = Invoke-ProcessCapture $adb (AdbArgs @('shell','cat',$status)) 10000
-        $expectedHash = (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash.ToLowerInvariant()
-        $parts = $ack.StdOut.Trim().Split('|')
-        if ($ack.ExitCode -ne 0 -or $parts.Count -ne 3 -or $parts[0] -ne $expectedHash -or $parts[1] -notmatch '^content://media/' -or $parts[2] -notmatch '^AndroidPrompt-.+\.png$') { throw 'Android helper did not confirm an integrity-matched MediaStore image.' }
-        [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','rm','-f',$status)))
-        Log "Windows image saved to Pictures/AndroidPrompt name=$($parts[2]) bytes=$length sha256=$expectedHash uri=$($parts[1])" 'PASS'
-    } catch { Log "Windows image transfer failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
-    finally {
-        if ($image) { $image.Dispose() }
-        if ($temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
-    }
-}
-
-function Share-LastAndroidImage {
-    try {
-        $package = 'com.androidprompt.clipboard'
-        $share = Invoke-ProcessCapture $adb (AdbArgs @('shell','am','start','-n',"$package/.ShareActivity")) 30000
-        if ($share.ExitCode -ne 0 -or $share.StdOut -notmatch 'Starting: Intent') { throw "Android helper could not open Share: $($share.StdOut.Trim()) $($share.StdErr.Trim())" }
-        Log 'Android Share chooser requested for last transferred image; app receipt=UNVERIFIED' 'WARN'
-    } catch { Log "Android image share failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
+    if (-not $script:imageTransfer.TryStart()) { Log 'image-transfer ignored because another Alt+3 transfer is active' 'WARN' }
 }
 
 function Capture-AndroidScreen {
@@ -227,6 +186,7 @@ try {
     $fcitxSelection = Set-AndroidFcitxUniKey $adb $device.Serial
     Log "Fcitx5 + UniKey selected explicitly: subtype=$($fcitxSelection.SubtypeId)" 'PASS'
     if ($PreflightOnly) { Log 'preflight completed' 'PASS'; exit 0 }
+    $imageTransfer = [ImageTransferWorker]::new($adb, $device.Serial, $log)
 
     $startupForeground = [AndroidPromptWindow]::GetForegroundWindow()
     $scrcpyProcess = Start-ControlSession
@@ -243,7 +203,6 @@ try {
     [void]$menu.Items.Add('Enter Android (Alt+1)', $null, { Enter-Android })
     [void]$menu.Items.Add('Return to Windows (Alt+2)', $null, { Return-Windows })
     [void]$menu.Items.Add('Send clipboard image to Android (Alt+3)', $null, { Send-WindowsImageToAndroid })
-    [void]$menu.Items.Add('Share last Android image', $null, { Share-LastAndroidImage })
     [void]$menu.Items.Add('Capture Android (Alt+4)', $null, { Capture-AndroidScreen })
     [void]$menu.Items.Add('-')
     [void]$menu.Items.Add('Exit', $null, { $script:exitRequested = $true; [Windows.Forms.Application]::Exit() })
@@ -272,6 +231,7 @@ try {
     if (-not $PreflightOnly) { [Windows.Forms.MessageBox]::Show($_.Exception.Message,'Android Prompt v9','OK','Error') | Out-Null }
     exit 1
 } finally {
+    if ($imageTransfer) { $imageTransfer.Dispose() }
     if ($tray) { $tray.Visible = $false; $tray.Dispose() }
     if ($window -and $window.IsAndroidActive) { Return-Windows }
     if ($window) { $window.Dispose() }

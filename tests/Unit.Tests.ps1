@@ -25,6 +25,7 @@ $fixture = 'mSubtypeNameOverride=Unikey mPkLanguageTag= mSubtypeId=-840535185 mS
 Assert ((Get-FcitxUniKeySubtypeIdFromDump $fixture) -eq -840535185) 'parses explicit UniKey subtype id'
 try { Get-FcitxUniKeySubtypeIdFromDump 'mSubtypeNameOverride=English mSubtypeId=1'; Assert $false 'rejects missing UniKey subtype' } catch { Assert $true 'rejects missing UniKey subtype' }
 $native = Get-Content -Raw (Join-Path $root 'src\NativeWindow.cs')
+$imageWorker = Get-Content -Raw (Join-Path $root 'src\ImageTransferWorker.cs')
 $launcher = Get-Content -Raw (Join-Path $root 'src\Start-AndroidPrompt.ps1')
 Assert ($native -match 'VK_SNAPSHOT' -and $native -match 'GetForegroundWindow\(\) == controlWindow') 'PrtScr is scoped to foreground Android control window'
 Assert ($native -match 'return new IntPtr\(1\)') 'Android PrtScr is consumed before Windows capture'
@@ -36,7 +37,9 @@ Assert ($native -match 'Register\(EXIT_ANDROID, 0x32\)') 'Alt+2 return hotkey re
 Assert ($launcher -match 'route-enter result=ANDROID_FOREGROUND' -and $launcher -match 'reason=already-foreground') 'repeated Alt+1 does not toggle capture'
 Assert ($launcher -match 'route-exit result=WINDOWS_VERIFIED' -and $launcher -match 'control-not-foreground') 'repeated Alt+2 verifies observable Windows state'
 Assert ($native -match 'Register\(SEND_IMAGE, 0x33\)' -and $launcher -match 'Send-WindowsImageToAndroid') 'Alt+3 sends the current Windows clipboard image on demand'
-Assert ($launcher -match 'Pictures/AndroidPrompt' -and $launcher -match 'Share-LastAndroidImage') 'Alt+3 saves to Pictures and keeps explicit Share fallback'
+Assert ($imageWorker -match '/sdcard/Pictures/AndroidPrompt' -and $imageWorker -match 'scan_file' -and $launcher -match 'TryStart') 'Alt+3 asynchronously saves and indexes Pictures/AndroidPrompt'
+Assert ($imageWorker -match 'CompareExchange' -and $imageWorker -match 'TimeoutMs|timeoutMs' -and $launcher -notmatch 'Share-LastAndroidImage') 'image worker prevents overlap, bounds ADB calls and removes unreliable Share'
+Assert ($launcher -match 'function Log[^{]+\{ try \{ \[void\]\(Write-V9Log' -and $launcher -notmatch 'Write-Host') 'runtime logging cannot block on console selection'
 Assert ($launcher -notmatch 'add_Clipboard|WM_CLIPBOARDUPDATE') 'image transfer does not add continuous clipboard synchronization'
 Assert ($native -notmatch 'WM_PASTE_IMAGE|imageClipboardArmed|VK_V' -and $launcher -notmatch 'Paste-ArmedAndroidImage|add_PasteImage') 'image transfer does not intercept Ctrl+V'
 Assert ($config.scrcpyArguments -notcontains '--no-clipboard-autosync') 'normal scrcpy text clipboard autosync remains enabled'

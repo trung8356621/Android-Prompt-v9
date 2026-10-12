@@ -30,6 +30,11 @@ function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $arg
 
 function Start-ControlSession {
     $arguments = @($config.scrcpyArguments)
+    $workingArea = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $windowWidth = 180; $windowHeight = 120; $windowMargin = 12
+    $windowX = [Math]::Max($workingArea.Left, $workingArea.Right - $windowWidth - $windowMargin)
+    $windowY = $workingArea.Top + $windowMargin + 26
+    $arguments += @('--always-on-top', "--window-width=$windowWidth", "--window-height=$windowHeight", "--window-x=$windowX", "--window-y=$windowY")
     if ($device.Serial) { $arguments += @('--serial', $device.Serial) }
     $psi = [Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $scrcpy
@@ -45,6 +50,11 @@ function Start-ControlSession {
     if (-not $process.Start()) { throw 'scrcpy failed to start.' }
     Start-Sleep -Milliseconds 800; $process.Refresh()
     if ($process.HasExited) { throw "scrcpy exited during startup: $($process.StandardError.ReadToEnd())" }
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ($process.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100; $process.Refresh()
+    }
+    if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'scrcpy control window was not created.' }
     Log "scrcpy control session started pid=$($process.Id) serial=$($device.Serial)" 'PASS'
     return $process
 }
@@ -165,6 +175,7 @@ try {
     exit 1
 } finally {
     if ($tray) { $tray.Visible = $false; $tray.Dispose() }
+    if ($window -and $window.IsAndroidActive) { Return-Windows }
     if ($window) { $window.Dispose() }
     if ($scrcpyProcess) { try { if (-not $scrcpyProcess.HasExited) { $scrcpyProcess.Kill($true) } } catch {}; $scrcpyProcess.Dispose() }
     if ($ownsMutex) { $mutex.ReleaseMutex() }; $mutex.Dispose()

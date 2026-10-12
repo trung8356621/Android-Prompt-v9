@@ -35,6 +35,9 @@ Assert ($config.scrcpyArguments -contains '--mouse-bind=++++:++++') 'middle clic
 Assert ($native -match 'Register\(EXIT_ANDROID, 0x32\)') 'Alt+2 return hotkey registered'
 Assert ($launcher -match 'duplicate Alt\+1 ignored' -and $launcher -match 'duplicate Alt\+2 ignored') 'routing switches are idempotent'
 Assert ($native -notmatch 'PUSH_IMAGE|PushImage' -and $launcher -notmatch 'Push-WindowsImage|clipboard image \(Alt\+3\)' -and -not $config.PSObject.Properties['pushImageHotkey']) 'Windows image push removed'
+Assert ($launcher -match '--always-on-top' -and $launcher -match 'windowWidth = 180' -and $launcher -match 'windowHeight = 120') 'compact always-on-top control window configured'
+Assert ($launcher -match "KEYCODE_WAKEUP") 'Android is awakened on entry'
+Assert ($launcher -match 'finally[\s\S]*IsAndroidActive[\s\S]*Return-Windows') 'shutdown restores Windows routing before cleanup'
 
 if ($failures.Count) { throw "$($failures.Count) unit test(s) failed: $($failures -join ', ')" }
 Write-Host "PASS: $passes unit tests"

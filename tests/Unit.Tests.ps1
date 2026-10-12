@@ -38,6 +38,8 @@ Assert ($launcher -match 'route-exit result=WINDOWS_VERIFIED' -and $launcher -ma
 Assert ($native -match 'Register\(SEND_IMAGE, 0x33\)' -and $launcher -match 'Send-WindowsImageToAndroid') 'Alt+3 sends the current Windows clipboard image on demand'
 Assert ($launcher -match 'paste=UNVERIFIED' -and $launcher -match 'Share-LastAndroidImage') 'image paste remains unverified and has explicit Share fallback'
 Assert ($launcher -notmatch 'add_Clipboard|WM_CLIPBOARDUPDATE') 'image transfer does not add continuous clipboard synchronization'
+Assert ($native -match 'WM_PASTE_IMAGE' -and $native -match 'imageClipboardArmed' -and $launcher -match '\.ShareActivity') 'armed image Ctrl+V bypasses scrcpy text clipboard overwrite via Share fallback'
+Assert ($config.scrcpyArguments -notcontains '--no-clipboard-autosync') 'normal scrcpy text clipboard autosync remains enabled'
 Assert ($launcher -match '--always-on-top' -and $launcher -match 'windowWidth = 180' -and $launcher -match 'windowHeight = 120') 'compact always-on-top control window configured'
 Assert ($launcher -match "KEYCODE_WAKEUP") 'Android is awakened on entry'
 Assert ($launcher -match 'finally[\s\S]*IsAndroidActive[\s\S]*Return-Windows') 'shutdown restores Windows routing before cleanup'

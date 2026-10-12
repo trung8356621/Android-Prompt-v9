@@ -37,5 +37,6 @@ try {
     if ($invalid -notmatch 'result=2') { throw 'Invalid filename was not rejected.' }
     Write-Host 'PASS invalid/absent image rejected'
 } finally {
+    & $adb -s $serial shell am broadcast --receiver-include-background -n "$package/.ImageClipboardReceiver" -a "$package.CLEAR_TEST" | Out-Null
     foreach ($file in $tempFiles) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
 }

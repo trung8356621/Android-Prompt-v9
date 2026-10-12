@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -14,12 +15,12 @@ import java.security.MessageDigest;
 
 public final class ImageClipboardReceiver extends BroadcastReceiver {
     private static final String SET = "com.androidprompt.clipboard.SET_IMAGE";
-    private static final String SHARE = "com.androidprompt.clipboard.SHARE_LAST";
+    private static final String CLEAR_TEST = "com.androidprompt.clipboard.CLEAR_TEST";
 
     @Override public void onReceive(Context context, Intent intent) {
         try {
             if (SET.equals(intent.getAction())) setImage(context, intent.getStringExtra("filename"));
-            else if (SHARE.equals(intent.getAction())) share(context);
+            else if (CLEAR_TEST.equals(intent.getAction())) clearTest(context);
             else throw new IllegalArgumentException("Unsupported action");
             setResultCode(1); setResultData("OK");
         } catch (Exception error) {
@@ -58,12 +59,10 @@ public final class ImageClipboardReceiver extends BroadcastReceiver {
         return result.toString();
     }
 
-    private void share(Context context) {
-        File current = new File(context.getCacheDir(), "clipboard/current.png");
-        if (!current.isFile()) throw new IllegalStateException("No transferred image");
-        Intent send = new Intent(Intent.ACTION_SEND).setType("image/png")
-            .putExtra(Intent.EXTRA_STREAM, ImageProvider.URI)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-        context.startActivity(Intent.createChooser(send, "Share Android Prompt image").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    private void clearTest(Context context) {
+        ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip();
+        else clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+        new File(context.getCacheDir(), "clipboard/current.png").delete();
     }
 }

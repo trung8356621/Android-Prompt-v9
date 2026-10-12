@@ -166,7 +166,8 @@ function Send-WindowsImageToAndroid {
         $expectedHash = (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($ack.ExitCode -ne 0 -or $ack.StdOut.Trim() -ne $expectedHash) { throw 'Android helper did not confirm an integrity-matched clipboard image.' }
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','rm','-f',$status)))
-        Log "Windows image registered in Android clipboard name=$name bytes=$length sha256=$expectedHash paste=UNVERIFIED" 'WARN'
+        $script:window.SetImageClipboardArmed($true)
+        Log "Windows image registered in Android clipboard name=$name bytes=$length sha256=$expectedHash nextCtrlV=SHARE_FALLBACK paste=UNVERIFIED" 'WARN'
     } catch { Log "Windows image transfer failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
     finally {
         if ($image) { $image.Dispose() }
@@ -174,11 +175,20 @@ function Send-WindowsImageToAndroid {
     }
 }
 
+function Paste-ArmedAndroidImage {
+    try {
+        $package = 'com.androidprompt.clipboard'
+        $probe = Invoke-ProcessCapture $adb (AdbArgs @('shell','run-as',$package,'ls','-l','cache/clipboard/current.png')) 10000
+        if ($probe.ExitCode -ne 0) { throw 'Android helper image is no longer readable.' }
+        Share-LastAndroidImage
+    } catch { Log "Android image Share fallback failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
+}
+
 function Share-LastAndroidImage {
     try {
         $package = 'com.androidprompt.clipboard'
-        $broadcast = Invoke-ProcessCapture $adb (AdbArgs @('shell','am','broadcast','--receiver-include-background','-n',"$package/.ImageClipboardReceiver",'-a',"$package.SHARE_LAST")) 30000
-        if ($broadcast.ExitCode -ne 0 -or $broadcast.StdOut -notmatch 'result=1') { throw "Android helper could not open Share: $($broadcast.StdOut.Trim()) $($broadcast.StdErr.Trim())" }
+        $share = Invoke-ProcessCapture $adb (AdbArgs @('shell','am','start','-n',"$package/.ShareActivity")) 30000
+        if ($share.ExitCode -ne 0 -or $share.StdOut -notmatch 'Starting: Intent') { throw "Android helper could not open Share: $($share.StdOut.Trim()) $($share.StdErr.Trim())" }
         Log 'Android Share chooser requested for last transferred image; app receipt=UNVERIFIED' 'WARN'
     } catch { Log "Android image share failed: $($_.Exception.Message)" 'FAIL'; [Console]::Beep(350,120) }
 }
@@ -235,6 +245,7 @@ try {
     $window.add_EnterAndroid({ Enter-Android })
     $window.add_ExitAndroid({ Return-Windows })
     $window.add_SendImage({ Send-WindowsImageToAndroid })
+    $window.add_PasteImage({ Paste-ArmedAndroidImage })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })
     $tray = [Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true

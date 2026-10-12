@@ -8,4 +8,4 @@ Build with JDK 17, Android SDK 35 and Gradle 8.9:
 gradle --no-daemon :app:assembleDebug
 ```
 
-Install `app/build/outputs/apk/debug/app-debug.apk` with `adb install -r`. The v9 launcher uses Alt+3 to transfer the current Windows clipboard image. If an Android app does not support image paste, use the tray command **Share last Android image**.
+Install `app/build/outputs/apk/debug/app-debug.apk` with `adb install -r`. The v9 launcher uses Alt+3 to transfer the current Windows clipboard image. The next Ctrl+V opens Android Share for apps such as Zalo that do not accept image clipboard paste; the tray command **Share last Android image** opens the same fallback.

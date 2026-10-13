@@ -27,8 +27,10 @@ try { Get-FcitxUniKeySubtypeIdFromDump 'mSubtypeNameOverride=English mSubtypeId=
 $native = Get-Content -Raw (Join-Path $root 'src\NativeWindow.cs')
 $imageWorker = Get-Content -Raw (Join-Path $root 'src\ImageTransferWorker.cs')
 $launcher = Get-Content -Raw (Join-Path $root 'src\Start-AndroidPrompt.ps1')
+$scrcpyPatch = Get-Content -Raw (Join-Path $root 'patches\scrcpy-4.1-ignore-printscreen.patch')
 Assert ($native -match 'VK_SNAPSHOT' -and $native -match 'GetForegroundWindow\(\) == controlWindow') 'PrtScr is scoped to foreground Android control window'
 Assert ($native -match 'return new IntPtr\(1\)') 'Android PrtScr is consumed before Windows capture'
+Assert ($scrcpyPatch -match 'sdl_keycode == SDLK_PRINTSCREEN' -and $scrcpyPatch -match '\+        return;') 'custom scrcpy prevents PrintScreen from reaching Android through UHID'
 Assert ($launcher -match 'exec-out screencap -p') 'screenshot streams directly from Android'
 Assert ($native -notmatch 'VK_MBUTTON|WH_MOUSE') 'no middle-mouse input hook'
 Assert ($launcher -notmatch 'input-bridge|ADB_INPUT|AdbIME|TextBox') 'no legacy chatbox or ADBKeyboard input'

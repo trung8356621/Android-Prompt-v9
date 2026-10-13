@@ -1,0 +1,19 @@
+diff --git a/app/src/input_manager.c b/app/src/input_manager.c
+index 3b12384..0b06253 100644
+--- a/app/src/input_manager.c
++++ b/app/src/input_manager.c
+@@ -429,6 +429,14 @@ sc_input_manager_process_key(struct sc_input_manager *im,
+     bool shift = event->mod & SDL_KMOD_SHIFT;
+     bool repeat = event->repeat;
+ 
++    // Android-Prompt handles PrintScreen on Windows and captures the device
++    // through ADB. Never forward this key through UHID: on Windows/SDL the
++    // release may be delivered only when the scrcpy window loses focus,
++    // which makes Android save an unwanted second screenshot on Alt+2.
++    if (sdl_keycode == SDLK_PRINTSCREEN) {
++        return;
++    }
++
+     // Either the modifier includes a shortcut modifier, or the key
+     // press/release is a modifier key.
+     // The second condition is necessary to ignore the release of the modifier

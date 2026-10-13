@@ -11,7 +11,8 @@ foreach ($file in $files) {
 }
 if ($errors.Count) { $errors | ForEach-Object { Write-Host "FAIL $_" }; exit 1 }
 
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $references = @([Windows.Forms.Form].Assembly.Location)
 Add-Type -Path (Join-Path $root 'src\NativeWindow.cs') -ReferencedAssemblies $references
-Write-Host "PASS: parsed $($files.Count) PowerShell files and compiled NativeWindow.cs"
+Add-Type -Path (Join-Path $root 'src\ImageTransferWorker.cs') -ReferencedAssemblies @([Windows.Forms.Form].Assembly.Location,[Drawing.Image].Assembly.Location)
+Write-Host "PASS: parsed $($files.Count) PowerShell files and compiled native helpers"

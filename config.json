@@ -1,9 +1,8 @@
 {
   "deviceSerial": "",
   "enterHotkey": "Alt+1",
-  "pushImageHotkey": "Alt+3",
+  "returnHotkey": "Alt+2",
   "captureScreenHotkey": "Alt+4",
-  "returnKey": "RightAlt",
   "autoRestart": true,
   "maxRestartAttempts": 5,
   "restartDelaySeconds": 2,

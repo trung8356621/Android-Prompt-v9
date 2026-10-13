@@ -1,6 +1,6 @@
 # Android-Prompt-v9
 
-V8 control experience with v9 direct Vietnamese input: Windows keyboard/mouse → scrcpy 4.1 UHID → Android Fcitx5 + UniKey VNI.
+Experimental true-headless control: Windows physical keyboard/mouse hooks → scrcpy-server 4.1 control protocol → Android UHID → Fcitx5 + UniKey VNI. No scrcpy control window, overlay, or foreground-focus dependency is used.
 
 ## Run
 
@@ -12,18 +12,18 @@ V8 control experience with v9 direct Vietnamese input: Windows keyboard/mouse �
 Controls:
 
 - `Alt+1`: wake Android and route keyboard/mouse to it.
-- `Alt+2`: release Android capture and restore the previous Windows app.
+- `RightAlt` or `Alt+2`: release Android routing and immediately restore Windows input.
 - `Alt+3`: transfer the current Windows clipboard image into the Android clipboard; then use Ctrl+V in an app that supports image paste.
-- `PrtScr`: copy the physical Android screen to the Windows clipboard only while the Android control window is foreground.
+- `PrtScr`: copy the physical Android screen to the Windows clipboard only while Android routing is active.
 - `Alt+4`: explicit Android screenshot fallback.
 - Tray `Exit`: restore Windows input and stop only the scrcpy process owned by v9.
 
-Repeated `Alt+1` or `Alt+2` is ignored once already in that state. Middle click and the other secondary mouse buttons are forwarded normally; there is no chatbox or ADBKeyboard. If an Android app does not accept image paste, use the tray command **Share last Android image**.
+Repeated transitions are idempotent. Middle click, secondary buttons, and scrolling are forwarded as UHID reports; there is no chatbox or ADBKeyboard. A separate input-disabled `scrcpy --no-window` session preserves Unicode text clipboard synchronization.
 
 ## Quick physical verification
 
-After `Alt+1`, type `a1 a2 o7 d9 ky2 tie61ng` in an Android text field and expect `á à ơ đ kỳ tiếng`. Check left/right/middle click and scroll, then press `Alt+2` and confirm the previous Windows app regains focus. Test `PrtScr` once in Android and once in Windows. These observations cannot be certified by static tests.
+Test with Windows UniKey both OFF and ON. After `Alt+1`, type `a1 a2 o7 d9 ky2 tie61ng` in an Android text field and expect `á à ơ đ kỳ tiếng`. Check left/right/middle click and scroll, then press `RightAlt` and confirm Windows receives input normally. Verify Ctrl+Shift before and after several transitions, and test `PrtScr` once in each mode. These observations cannot be certified by static tests.
 
 ## Rollback
 
-Stop v9 from the tray and check out branch `fix/v8-experience-v9-vni` to remove only the image feature. The helper APK may be removed with `adb uninstall com.androidprompt.clipboard`.
+Stop v9 from the tray, then run `git switch hotfix/alt2-extra-screenshot` to return to the exact pre-experiment baseline. No Android APK is added by this branch.

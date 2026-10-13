@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$PreflightOnly)
+param([switch]$PreflightOnly, [int]$SmokeTestSeconds = 0)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -7,6 +7,7 @@ Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $root = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'AndroidPrompt.Core.psm1') -Force
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeWindow.cs') -ReferencedAssemblies System.Windows.Forms.dll
+Add-Type -Path (Join-Path $PSScriptRoot 'HeadlessInputBridge.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'ImageTransferWorker.cs') -ReferencedAssemblies System.Windows.Forms.dll,System.Drawing.dll
 
 $config = Get-Content -Raw (Join-Path $root 'config.json') | ConvertFrom-Json
@@ -15,14 +16,14 @@ $logDirectory = Join-Path $root 'logs'
 $log = Join-Path $logDirectory ('v9-{0:yyyyMMdd}.log' -f (Get-Date))
 $tools = Join-Path $root 'tools'
 $adb = Join-Path $tools 'adb.exe'
+$scrcpyServer = Join-Path $tools 'scrcpy-server'
 $scrcpy = Join-Path $tools 'scrcpy.exe'
 $mutex = [Threading.Mutex]::new($false, 'AndroidPromptV9.Singleton')
 $ownsMutex = $false
-$scrcpyProcess = $null
+$inputBridge = $null
+$clipboardProcess = $null
 $window = $null
 $tray = $null
-$previousForeground = [IntPtr]::Zero
-$startupForeground = [IntPtr]::Zero
 $exitRequested = $false
 $restartCount = 0
 $captureBusy = $false
@@ -31,82 +32,37 @@ $imageTransfer = $null
 function Log([string]$message, [string]$level = 'INFO') { try { [void](Write-V9Log -Path $log -Message $message -Level $level) } catch {} }
 function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $args }
 
-function Get-ControlHandle {
-    if ($null -eq $script:scrcpyProcess -or $script:scrcpyProcess.HasExited) { return [IntPtr]::Zero }
-    $script:scrcpyProcess.Refresh()
-    return $script:scrcpyProcess.MainWindowHandle
-}
-
-function Get-WindowsFocusTarget([IntPtr]$control) {
-    foreach ($candidate in @($script:previousForeground, $script:startupForeground, [AndroidPromptWindow]::GetShellWindow())) {
-        if ($candidate -ne $control -and [AndroidPromptWindow]::IsUsableWindow($candidate)) { return $candidate }
-    }
-    return [IntPtr]::Zero
-}
-
 function Start-ControlSession {
-    $arguments = @($config.scrcpyArguments)
-    $workingArea = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $windowWidth = 180; $windowHeight = 120; $windowMargin = 12
-    $windowX = [Math]::Max($workingArea.Left, $workingArea.Right - $windowWidth - $windowMargin)
-    $windowY = $workingArea.Top + $windowMargin + 26
-    $arguments += @('--always-on-top', "--window-width=$windowWidth", "--window-height=$windowHeight", "--window-x=$windowX", "--window-y=$windowY")
+    $bridge = [HeadlessInputBridge]::new($adb, $device.Serial, $scrcpyServer)
+    Log "headless scrcpy-server control session started serial=$($device.Serial) state=$($bridge.State)" 'PASS'
+    return $bridge
+}
+
+function Start-ClipboardSession {
+    $arguments = @('--no-window','--no-video','--no-audio','--keyboard=disabled','--mouse=disabled','--no-power-on')
     if ($device.Serial) { $arguments += @('--serial', $device.Serial) }
     $psi = [Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $scrcpy
-    $psi.WorkingDirectory = $tools
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardError = $true
-    $psi.Arguments = (($arguments | ForEach-Object {
-        $value = [string]$_
-        if ($value -match '[\s"]') { '"' + ($value -replace '(\\*)"','$1$1\"' -replace '(\\+)$','$1$1') + '"' } else { $value }
-    }) -join ' ')
-    $process = [Diagnostics.Process]::new(); $process.StartInfo = $psi
-    if (-not $process.Start()) { throw 'scrcpy failed to start.' }
-    Start-Sleep -Milliseconds 800; $process.Refresh()
-    if ($process.HasExited) { throw "scrcpy exited during startup: $($process.StandardError.ReadToEnd())" }
-    $deadline = [DateTime]::UtcNow.AddSeconds(5)
-    while ($process.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 100; $process.Refresh()
-    }
-    if ($process.MainWindowHandle -eq [IntPtr]::Zero) { throw 'scrcpy control window was not created.' }
-    Log "scrcpy control session started pid=$($process.Id) serial=$($device.Serial)" 'PASS'
+    $psi.FileName = $scrcpy; $psi.WorkingDirectory = $tools
+    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardError = $true; $psi.Arguments = $arguments -join ' '
+    $process = [Diagnostics.Process]::Start($psi)
+    Start-Sleep -Milliseconds 500
+    if ($process.HasExited) { throw "Headless clipboard session failed: $($process.StandardError.ReadToEnd())" }
+    Log "headless text clipboard session started pid=$($process.Id)" 'PASS'
     return $process
 }
 
 function Enter-Android {
     try {
-        if ($null -eq $script:scrcpyProcess -or $script:scrcpyProcess.HasExited) { throw 'Control session is not running.' }
-        $control = Get-ControlHandle
-        $before = [AndroidPromptWindow]::GetForegroundWindow()
-        $trackedBefore = $script:window.IsAndroidActive
-        Log "route-enter begin foreground=$before control=$control trackedAndroid=$trackedBefore"
-        if ($control -eq [IntPtr]::Zero) { throw 'Control session has no window.' }
-        if ($before -eq $control) {
-            $script:window.SetAndroidActive($true)
-            Log "route-enter result=ANDROID_FOREGROUND foreground=$before control=$control capture=UNVERIFIED reason=already-foreground" 'WARN'
-            return
-        }
-        if ([AndroidPromptWindow]::IsUsableWindow($before)) { $script:previousForeground = $before }
-        if ($trackedBefore) {
-            $script:window.SetAndroidActive($false)
-            Log 'route-enter reconciled stale trackedAndroid=true because control was not foreground' 'WARN'
-        }
+        if ($null -eq $script:inputBridge -or -not $script:inputBridge.IsConnected) { throw 'Headless control session is not connected.' }
+        Log "route-enter begin state=$($script:inputBridge.State)"
         [void](Invoke-ProcessCapture $adb (AdbArgs @('shell','input','keyevent','KEYCODE_WAKEUP')) 5000)
-        if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before switching.' }
-        if (-not [AndroidPromptWindow]::FocusAndVerify($control, 1000)) { throw "Could not verify Android control focus; foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$control" }
-        # The prior non-control foreground guarantees scrcpy received FOCUS_LOST.
-        # In scrcpy 4.1, the first mouse-up in that released state is consumed and enables capture.
-        Start-Sleep -Milliseconds 100
-        if (-not [AndroidPromptWindow]::CaptureScrcpyFromReleasedState($control)) { throw 'Could not request scrcpy mouse capture.' }
+        if (-not $script:inputBridge.EnterAndroid()) { throw "Could not enter Android routing state: $($script:inputBridge.State)" }
         $script:window.SetAndroidActive($true)
-        $after = [AndroidPromptWindow]::GetForegroundWindow()
-        if ($after -ne $control) { throw "Android focus was lost after capture request; foreground=$after control=$control" }
-        Log "route-enter result=ANDROID_FOREGROUND foreground=$after control=$control capture=CLICK_REQUESTED_UNVERIFIABLE" 'WARN'
+        Log 'route-enter result=ANDROID state=ANDROID transport=HEADLESS_UHID' 'PASS'
     } catch {
         if ($script:window) { $script:window.SetAndroidActive($false) }
-        Log "route-enter result=FAIL foreground=$([AndroidPromptWindow]::GetForegroundWindow()) error=$($_.Exception.Message)" 'FAIL'
+        Log "route-enter result=FAIL error=$($_.Exception.Message)" 'FAIL'
         [Console]::Beep(350,120)
     }
 }
@@ -114,27 +70,12 @@ function Enter-Android {
 function Return-Windows {
     try {
         if (-not $script:window) { throw 'Routing window is unavailable.' }
-        $control = Get-ControlHandle
-        $before = [AndroidPromptWindow]::GetForegroundWindow()
-        $trackedBefore = $script:window.IsAndroidActive
-        Log "route-exit begin foreground=$before control=$control trackedAndroid=$trackedBefore"
-        if ($control -eq [IntPtr]::Zero -or $before -ne $control) {
-            $script:window.SetAndroidActive($false)
-            Log "route-exit result=WINDOWS_VERIFIED foreground=$before control=$control reason=control-not-foreground" 'PASS'
-            return
-        }
-        $target = Get-WindowsFocusTarget $control
-        if ($target -eq [IntPtr]::Zero) { throw 'No valid Windows focus target is available.' }
-        if (-not [AndroidPromptWindow]::WaitForLocalInputRelease(1500)) { throw 'Release Ctrl, Alt, Shift and mouse buttons before returning to Windows.' }
-        if (-not [AndroidPromptWindow]::FocusAndVerify($target, 1000)) {
-            throw "Could not verify Windows focus; foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$control target=$target"
-        }
-        $after = [AndroidPromptWindow]::GetForegroundWindow()
-        if ($after -eq $control) { throw "Control window still owns foreground after Alt+2; control=$control target=$target" }
+        Log "route-exit begin state=$($script:inputBridge.State)"
+        $script:inputBridge.ReturnWindows()
         $script:window.SetAndroidActive($false)
-        Log "route-exit result=WINDOWS_VERIFIED foreground=$after control=$control target=$target focusLostRelease=EXPECTED" 'PASS'
+        Log "route-exit result=WINDOWS state=$($script:inputBridge.State)" 'PASS'
     } catch {
-        Log "route-exit result=FAIL foreground=$([AndroidPromptWindow]::GetForegroundWindow()) error=$($_.Exception.Message)" 'FAIL'
+        Log "route-exit result=FAIL error=$($_.Exception.Message)" 'FAIL'
         [Console]::Beep(350,120)
     }
 }
@@ -176,7 +117,7 @@ function Capture-AndroidScreen {
 try {
     try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
     if (-not $ownsMutex) { throw 'Android Prompt v9 is already running.' }
-    foreach ($path in @($adb,$scrcpy)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing runtime tool: $path. Run install.ps1 first." } }
+    foreach ($path in @($adb,$scrcpy,$scrcpyServer)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing runtime tool: $path. Run install.ps1 first." } }
     $devices = Get-AdbDevices $adb
     $device = Select-AdbDevice $devices ([string]$config.deviceSerial)
     Log "ADB device ready: $($device.Serial)" 'PASS'
@@ -188,15 +129,16 @@ try {
     if ($PreflightOnly) { Log 'preflight completed' 'PASS'; exit 0 }
     $imageTransfer = [ImageTransferWorker]::new($adb, $device.Serial, $log)
 
-    $startupForeground = [AndroidPromptWindow]::GetForegroundWindow()
-    $scrcpyProcess = Start-ControlSession
     $window = [AndroidPromptWindow]::new()
-    $window.SetControlWindowHandle($scrcpyProcess.MainWindowHandle)
-    Log "startup routing observation foreground=$([AndroidPromptWindow]::GetForegroundWindow()) control=$($scrcpyProcess.MainWindowHandle) preStartForeground=$startupForeground action=NONE"
     $window.add_EnterAndroid({ Enter-Android })
     $window.add_ExitAndroid({ Return-Windows })
     $window.add_SendImage({ Send-WindowsImageToAndroid })
     $window.add_CaptureAndroid({ Capture-AndroidScreen })
+    $inputBridge = Start-ControlSession
+    $clipboardProcess = Start-ClipboardSession
+    $inputBridge.add_EmergencyReturn({ $script:window.RequestReturnWindows() })
+    $inputBridge.add_CaptureAndroid({ $script:window.RequestCaptureAndroid() })
+    $inputBridge.add_Disconnected({ $script:window.RequestReturnWindows() })
     $tray = [Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true
     $menu = [Windows.Forms.ContextMenuStrip]::new()
@@ -209,8 +151,10 @@ try {
     $tray.ContextMenuStrip = $menu
 
     $timer = [Windows.Forms.Timer]::new(); $timer.Interval = 500
+    $smokeDeadline = if ($SmokeTestSeconds -gt 0) { [DateTime]::UtcNow.AddSeconds($SmokeTestSeconds) } else { [DateTime]::MaxValue }
     $timer.add_Tick({
-        if ($script:scrcpyProcess.HasExited -and -not $script:exitRequested) {
+        if ([DateTime]::UtcNow -ge $script:smokeDeadline) { $script:exitRequested = $true; [Windows.Forms.Application]::Exit(); return }
+        if (-not $script:inputBridge.IsConnected -and -not $script:exitRequested) {
             if ($script:window.IsAndroidActive) {
                 Return-Windows
                 Log 'control session disconnected; Windows input restored before restart' 'WARN'
@@ -218,13 +162,15 @@ try {
             if ($config.autoRestart -and $script:restartCount -lt $config.maxRestartAttempts) {
                 $script:restartCount++; Log "scrcpy stopped; restart $($script:restartCount)/$($config.maxRestartAttempts)" 'WARN'
                 try {
-                    $script:scrcpyProcess.Dispose(); $script:scrcpyProcess = Start-ControlSession
-                    $script:window.SetControlWindowHandle($script:scrcpyProcess.MainWindowHandle)
+                    $script:inputBridge.Dispose(); $script:inputBridge = Start-ControlSession
+                    $script:inputBridge.add_EmergencyReturn({ $script:window.RequestReturnWindows() })
+                    $script:inputBridge.add_CaptureAndroid({ $script:window.RequestCaptureAndroid() })
+                    $script:inputBridge.add_Disconnected({ $script:window.RequestReturnWindows() })
                 } catch { Log $_.Exception.Message 'FAIL' }
             } else { Log 'scrcpy stopped; restart limit reached' 'FAIL'; [Windows.Forms.Application]::Exit() }
         }
     })
-    $timer.Start(); Log 'ready: Alt+1 Android, Alt+2 Windows, PrtScr Android screenshot' 'PASS'
+    $timer.Start(); Log 'ready headless: Alt+1 Android, RightAlt/Alt+2 Windows, PrtScr Android screenshot' 'PASS'
     [Windows.Forms.Application]::Run()
 } catch {
     Log $_.Exception.Message 'FAIL'
@@ -235,7 +181,8 @@ try {
     if ($tray) { $tray.Visible = $false; $tray.Dispose() }
     if ($window -and $window.IsAndroidActive) { Return-Windows }
     if ($window) { $window.Dispose() }
-    if ($scrcpyProcess) { try { if (-not $scrcpyProcess.HasExited) { $scrcpyProcess.Kill($true) } } catch {}; $scrcpyProcess.Dispose() }
+    if ($inputBridge) { $inputBridge.Dispose() }
+    if ($clipboardProcess) { try { if (-not $clipboardProcess.HasExited) { $clipboardProcess.Kill(); $clipboardProcess.WaitForExit(3000) } } catch {}; $clipboardProcess.Dispose() }
     if ($ownsMutex) { $mutex.ReleaseMutex() }; $mutex.Dispose()
     Log 'shutdown complete; Windows input ownership retained' 'PASS'
 }

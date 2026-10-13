@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
-    const int WM_HOTKEY = 0x0312;
+    const int WM_HOTKEY = 0x0312, WM_INPUT = 0x00FF;
     const int WM_CAPTURE_ANDROID = 0x8002, WM_RETURN_WINDOWS = 0x8003;
     const uint MOD_ALT = 0x0001, MOD_NOREPEAT = 0x4000;
     const int ENTER = 0x901, EXIT_ANDROID = 0x902, SEND_IMAGE = 0x903, CAPTURE = 0x904;
@@ -11,6 +11,7 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
     public event Action ExitAndroid;
     public event Action SendImage;
     public event Action CaptureAndroid;
+    public event Action<IntPtr> RawInput;
     volatile bool androidActive;
 
     [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterHotKey(IntPtr h, int id, uint mod, uint key);
@@ -47,6 +48,8 @@ public sealed class AndroidPromptWindow : NativeWindow, IDisposable {
             CaptureAndroid();
         } else if (m.Msg == WM_RETURN_WINDOWS && ExitAndroid != null) {
             ExitAndroid();
+        } else if (m.Msg == WM_INPUT && RawInput != null) {
+            RawInput(m.LParam);
         }
         base.WndProc(ref m);
     }

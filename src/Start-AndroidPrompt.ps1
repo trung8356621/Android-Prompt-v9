@@ -33,7 +33,7 @@ function Log([string]$message, [string]$level = 'INFO') { try { [void](Write-V9L
 function AdbArgs([string[]]$args) { return @('-s', $script:device.Serial) + $args }
 
 function Start-ControlSession {
-    $bridge = [HeadlessInputBridge]::new($adb, $device.Serial, $scrcpyServer)
+    $bridge = [HeadlessInputBridge]::new($adb, $device.Serial, $scrcpyServer, $window.Handle)
     Log "headless scrcpy-server control session started serial=$($device.Serial) state=$($bridge.State)" 'PASS'
     return $bridge
 }
@@ -139,6 +139,7 @@ try {
     $inputBridge.add_EmergencyReturn({ $script:window.RequestReturnWindows() })
     $inputBridge.add_CaptureAndroid({ $script:window.RequestCaptureAndroid() })
     $inputBridge.add_Disconnected({ $script:window.RequestReturnWindows() })
+    $window.add_RawInput({ param($rawHandle) $script:inputBridge.ProcessRawInput($rawHandle) })
     $tray = [Windows.Forms.NotifyIcon]::new()
     $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true
     $menu = [Windows.Forms.ContextMenuStrip]::new()

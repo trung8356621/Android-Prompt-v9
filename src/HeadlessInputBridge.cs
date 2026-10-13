@@ -31,8 +31,8 @@ public sealed class HeadlessInputBridge : IDisposable {
     string adbPath, serial;
     int localPort;
     byte modifiers, mouseButtons;
-    int lastX, lastY, warpTargetX, warpTargetY;
-    bool haveMousePosition, warpPending, disposed;
+    IntPtr rawInputWindow;
+    bool disposed;
     volatile RoutingState state = RoutingState.Disconnected;
 
     public event Action EmergencyReturn;
@@ -41,11 +41,13 @@ public sealed class HeadlessInputBridge : IDisposable {
     public RoutingState State { get { return state; } }
     public bool IsConnected { get { return client != null && client.Connected && state != RoutingState.Disconnected; } }
 
-    public HeadlessInputBridge(string adb, string deviceSerial, string serverJar) {
+    public HeadlessInputBridge(string adb, string deviceSerial, string serverJar, IntPtr inputWindow) {
         adbPath = adb; serial = deviceSerial;
+        rawInputWindow = inputWindow;
         keyboardProc = KeyboardCallback; mouseProc = MouseCallback;
         try {
             StartServer(serverJar);
+            RegisterRawMouse(rawInputWindow, false);
             keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, IntPtr.Zero, 0);
             mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, IntPtr.Zero, 0);
             if (keyboardHook == IntPtr.Zero || mouseHook == IntPtr.Zero) throw new InvalidOperationException("Cannot install headless input hooks.");
@@ -57,7 +59,6 @@ public sealed class HeadlessInputBridge : IDisposable {
         if (!IsConnected || state != RoutingState.Windows) return state == RoutingState.Android;
         state = RoutingState.EnteringAndroid;
         ReleaseAll();
-        haveMousePosition = false; warpPending = false;
         state = RoutingState.Android;
         return true;
     }
@@ -66,7 +67,6 @@ public sealed class HeadlessInputBridge : IDisposable {
         if (state == RoutingState.Windows) return;
         state = RoutingState.ReturningWindows;
         try { ReleaseAll(); } catch { }
-        haveMousePosition = false; warpPending = false;
         state = IsSocketAlive() ? RoutingState.Windows : RoutingState.Disconnected;
     }
 
@@ -142,21 +142,10 @@ public sealed class HeadlessInputBridge : IDisposable {
         if (code < 0 || state != RoutingState.Android) return CallNextHookEx(mouseHook, code, wParam, lParam);
         MouseData data = (MouseData)Marshal.PtrToStructure(lParam, typeof(MouseData));
         int msg = wParam.ToInt32();
-        if (msg == WM_MOUSEMOVE && warpPending && Math.Abs(data.pt.x - warpTargetX) <= 2 && Math.Abs(data.pt.y - warpTargetY) <= 2) {
-            warpPending = false; lastX = data.pt.x; lastY = data.pt.y; haveMousePosition = true;
-            return new IntPtr(1);
-        }
         if ((data.flags & LLMHF_INJECTED) != 0) return new IntPtr(1);
-        int dx = 0, dy = 0, wheel = 0, hWheel = 0;
-        if (msg == WM_MOUSEMOVE) {
-            if (haveMousePosition) { dx = data.pt.x - lastX; dy = data.pt.y - lastY; }
-            lastX = data.pt.x; lastY = data.pt.y; haveMousePosition = true;
-            int width = GetSystemMetrics(0), height = GetSystemMetrics(1);
-            if (data.pt.x < 100 || data.pt.y < 100 || data.pt.x > width - 100 || data.pt.y > height - 100) {
-                warpTargetX = width / 2; warpTargetY = height / 2; warpPending = true;
-                lastX = warpTargetX; lastY = warpTargetY; SetCursorPos(lastX, lastY);
-            }
-        } else if (msg == WM_LBUTTONDOWN) mouseButtons |= 1;
+        if (msg == WM_MOUSEMOVE) return new IntPtr(1);
+        int wheel = 0, hWheel = 0;
+        if (msg == WM_LBUTTONDOWN) mouseButtons |= 1;
         else if (msg == WM_LBUTTONUP) mouseButtons = (byte)(mouseButtons & ~1);
         else if (msg == WM_RBUTTONDOWN) mouseButtons |= 2;
         else if (msg == WM_RBUTTONUP) mouseButtons = (byte)(mouseButtons & ~2);
@@ -166,8 +155,25 @@ public sealed class HeadlessInputBridge : IDisposable {
         else if (msg == WM_XBUTTONUP) mouseButtons = (byte)(mouseButtons & ~((HighWord(data.mouseData) == 1) ? 8 : 16));
         else if (msg == WM_MOUSEWHEEL) wheel = Math.Sign((short)HighWord(data.mouseData));
         else if (msg == WM_MOUSEHWHEEL) hWheel = Math.Sign((short)HighWord(data.mouseData));
-        try { SendMouse(dx, dy, wheel, hWheel); } catch { MarkDisconnected(); }
+        try { SendMouse(0, 0, wheel, hWheel); } catch { MarkDisconnected(); }
         return new IntPtr(1);
+    }
+
+    public void ProcessRawInput(IntPtr rawInputHandle) {
+        if (state != RoutingState.Android) return;
+        uint size = 0, headerSize = (uint)Marshal.SizeOf(typeof(RawInputHeader));
+        if (GetRawInputData(rawInputHandle, 0x10000003, IntPtr.Zero, ref size, headerSize) != 0 || size == 0) return;
+        IntPtr buffer = Marshal.AllocHGlobal((int)size);
+        try {
+            if (GetRawInputData(rawInputHandle, 0x10000003, buffer, ref size, headerSize) != size) return;
+            RawInputHeader header = (RawInputHeader)Marshal.PtrToStructure(buffer, typeof(RawInputHeader));
+            if (header.dwType != 0) return;
+            int mouseOffset = (int)headerSize;
+            int dx = Marshal.ReadInt32(buffer, mouseOffset + 12);
+            int dy = Marshal.ReadInt32(buffer, mouseOffset + 16);
+            if (dx != 0 || dy != 0) SendMouse(dx, dy, 0, 0);
+        } catch { MarkDisconnected(); }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     void SendKeyboard() {
@@ -208,6 +214,11 @@ public sealed class HeadlessInputBridge : IDisposable {
     static int GetFreePort() { var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); listener.Start(); int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
     static int Clamp(int value) { return Math.Max(-127, Math.Min(127, value)); }
     static int HighWord(uint value) { return (int)((value >> 16) & 0xffff); }
+    static void RegisterRawMouse(IntPtr window, bool remove) {
+        var device = new RawInputDevice { usUsagePage = 1, usUsage = 2, dwFlags = remove ? 1u : 0x100u, hwndTarget = remove ? IntPtr.Zero : window };
+        if (!RegisterRawInputDevices(new[] { device }, 1, (uint)Marshal.SizeOf(typeof(RawInputDevice))))
+            throw new InvalidOperationException("Cannot register raw mouse input.");
+    }
 
     public void Dispose() {
         if (disposed) return; disposed = true;
@@ -215,6 +226,7 @@ public sealed class HeadlessInputBridge : IDisposable {
         try { ReleaseAll(); SendDestroy(KEYBOARD_ID); SendDestroy(MOUSE_ID); } catch { }
         if (keyboardHook != IntPtr.Zero) { UnhookWindowsHookEx(keyboardHook); keyboardHook = IntPtr.Zero; }
         if (mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(mouseHook); mouseHook = IntPtr.Zero; }
+        try { RegisterRawMouse(IntPtr.Zero, true); } catch { }
         try { if (stream != null) stream.Dispose(); } catch { } try { if (client != null) client.Dispose(); } catch { }
         try { if (serverProcess != null && !serverProcess.HasExited) serverProcess.Kill(); } catch { }
         try { RunAdb(3000, "forward", "--remove", "tcp:" + localPort); } catch { }
@@ -236,9 +248,11 @@ public sealed class HeadlessInputBridge : IDisposable {
     [StructLayout(LayoutKind.Sequential)] struct Point { public int x, y; }
     [StructLayout(LayoutKind.Sequential)] struct KbdData { public uint vkCode, scanCode, flags, time; public UIntPtr extraInfo; }
     [StructLayout(LayoutKind.Sequential)] struct MouseData { public Point pt; public uint mouseData, flags, time; public UIntPtr extraInfo; }
+    [StructLayout(LayoutKind.Sequential)] struct RawInputDevice { public ushort usUsagePage, usUsage; public uint dwFlags; public IntPtr hwndTarget; }
+    [StructLayout(LayoutKind.Sequential)] struct RawInputHeader { public uint dwType, dwSize; public IntPtr hDevice; public IntPtr wParam; }
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SetWindowsHookEx(int id, HookProc callback, IntPtr module, uint threadId);
     [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
     [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
-    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", SetLastError=true)] static extern bool RegisterRawInputDevices([In] RawInputDevice[] devices, uint count, uint size);
+    [DllImport("user32.dll")] static extern uint GetRawInputData(IntPtr rawInput, uint command, IntPtr data, ref uint size, uint headerSize);
 }

@@ -5,7 +5,7 @@ logs/
 tools/
 
 # Packaged deliverables and archives
-dist/
+dist*/
 *.zip
 *.7z
 *.tar

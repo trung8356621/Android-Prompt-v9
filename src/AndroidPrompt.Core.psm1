@@ -54,7 +54,8 @@ function Get-AdbDevices {
 }
 
 function Select-AdbDevice {
-    param([Parameter(Mandatory)][object[]]$Devices, [string]$RequestedSerial)
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Devices, [string]$RequestedSerial)
+    $Devices = @($Devices)
     if ($RequestedSerial) {
         $match = @($Devices | Where-Object Serial -eq $RequestedSerial)
         if ($match.Count -ne 1) { throw "Configured Android device not found: $RequestedSerial" }

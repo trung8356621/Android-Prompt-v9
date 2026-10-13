@@ -13,6 +13,7 @@ Assert ($one.Serial -eq 'abc') 'selects sole authorized device'
 $chosen = Select-AdbDevice @([pscustomobject]@{Serial='a';State='device'},[pscustomobject]@{Serial='b';State='device'}) 'b'
 Assert ($chosen.Serial -eq 'b') 'selects configured serial'
 try { Select-AdbDevice @([pscustomobject]@{Serial='a';State='offline'}) ''; Assert $false 'rejects offline device' } catch { Assert $true 'rejects offline device' }
+try { Select-AdbDevice @() ''; Assert $false 'reports no connected device clearly' } catch { Assert ($_.Exception.Message -eq 'No authorized Android device detected.') 'reports no connected device clearly' }
 try { Select-AdbDevice @([pscustomobject]@{Serial='a';State='device'},[pscustomobject]@{Serial='b';State='device'}) ''; Assert $false 'rejects ambiguous devices' } catch { Assert $true 'rejects ambiguous devices' }
 Assert ((Get-SafeImageExtension 'jpeg') -eq '.jpg') 'maps jpeg extension'
 Assert ((Get-SafeImageExtension 'anything') -eq '.png') 'defaults to png extension'

@@ -1,10 +1,10 @@
 [CmdletBinding()]
-param()
+param([string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = Split-Path $PSScriptRoot -Parent
-$distRoot = Join-Path $root 'dist'
+$distRoot = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root 'dist' }
 $packageName = 'Android-Prompt-v9-Portable'
 $package = Join-Path $distRoot $packageName
 $zip = Join-Path $distRoot ($packageName + '.zip')

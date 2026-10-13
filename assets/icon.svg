@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="AndroidPrompt keyboard and phone icon">
+  <rect width="256" height="256" rx="56" fill="#101827"/>
+  <rect x="139" y="35" width="70" height="130" rx="14" fill="none" stroke="#22d3ee" stroke-width="12"/>
+  <circle cx="174" cy="143" r="6" fill="#22d3ee"/>
+  <path d="M45 105h119a15 15 0 0 1 15 15v73a15 15 0 0 1-15 15H45a15 15 0 0 1-15-15v-73a15 15 0 0 1 15-15Z" fill="#17243a" stroke="#60a5fa" stroke-width="10"/>
+  <g fill="#dbeafe">
+    <rect x="49" y="127" width="17" height="14" rx="3"/><rect x="75" y="127" width="17" height="14" rx="3"/><rect x="101" y="127" width="17" height="14" rx="3"/><rect x="127" y="127" width="17" height="14" rx="3"/>
+    <rect x="49" y="151" width="17" height="14" rx="3"/><rect x="75" y="151" width="17" height="14" rx="3"/><rect x="101" y="151" width="17" height="14" rx="3"/><rect x="127" y="151" width="17" height="14" rx="3"/>
+    <rect x="62" y="176" width="70" height="13" rx="4"/>
+  </g>
+  <path d="M105 87h42l-11-11m11 11-11 11" fill="none" stroke="#22d3ee" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

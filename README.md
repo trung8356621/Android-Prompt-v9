@@ -2,6 +2,14 @@
 
 Experimental true-headless control: Windows physical keyboard/mouse hooks → scrcpy-server 4.1 control protocol → Android UHID → Fcitx5 + UniKey VNI. No scrcpy control window, overlay, or foreground-focus dependency is used.
 
+## Portable Windows package
+
+Build with `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\Build-Portable.ps1`. The reproducible output is `dist\Android-Prompt-v9-Portable.zip`.
+
+To use it, extract the complete archive to any writable folder and double-click `AndroidPrompt.exe`. Keep `src`, `tools`, `assets`, and `config.json` beside the EXE. The launcher is a Windows GUI executable and starts the existing PowerShell STA host without a console window. Windows PowerShell 5.1, included with Windows 10/11, is required; scrcpy 4.1, ADB, and their DLLs are bundled.
+
+Logs are written under the extracted package's `logs` directory. If Windows blocks a downloaded ZIP, open its Properties, select **Unblock**, then extract it again.
+
 ## Run
 
 1. Connect one authorized Android device by USB.

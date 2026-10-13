@@ -24,6 +24,7 @@ $inputBridge = $null
 $clipboardProcess = $null
 $window = $null
 $tray = $null
+$appIcon = $null
 $exitRequested = $false
 $restartCount = 0
 $captureBusy = $false
@@ -141,7 +142,10 @@ try {
     $inputBridge.add_Disconnected({ $script:window.RequestReturnWindows() })
     $window.add_RawInput({ param($rawHandle) $script:inputBridge.ProcessRawInput($rawHandle) })
     $tray = [Windows.Forms.NotifyIcon]::new()
-    $tray.Icon = [Drawing.SystemIcons]::Application; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true
+    $iconPath = Join-Path $root 'assets\AndroidPrompt.ico'
+    if (-not (Test-Path -LiteralPath $iconPath)) { throw "Missing application icon: $iconPath" }
+    $appIcon = [Drawing.Icon]::new($iconPath, 16, 16)
+    $tray.Icon = $appIcon; $tray.Text = 'Android Prompt v9'; $tray.Visible = $true
     $menu = [Windows.Forms.ContextMenuStrip]::new()
     [void]$menu.Items.Add('Enter Android (Alt+1)', $null, { Enter-Android })
     [void]$menu.Items.Add('Return to Windows (Alt+2)', $null, { Return-Windows })
@@ -180,6 +184,7 @@ try {
 } finally {
     if ($imageTransfer) { $imageTransfer.Dispose() }
     if ($tray) { $tray.Visible = $false; $tray.Dispose() }
+    if ($appIcon) { $appIcon.Dispose() }
     if ($window -and $window.IsAndroidActive) { Return-Windows }
     if ($window) { $window.Dispose() }
     if ($inputBridge) { $inputBridge.Dispose() }

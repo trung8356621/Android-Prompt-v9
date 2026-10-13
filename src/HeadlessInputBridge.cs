@@ -31,8 +31,8 @@ public sealed class HeadlessInputBridge : IDisposable {
     string adbPath, serial;
     int localPort;
     byte modifiers, mouseButtons;
-    int lastX, lastY;
-    bool haveMousePosition, disposed;
+    int lastX, lastY, warpTargetX, warpTargetY;
+    bool haveMousePosition, warpPending, disposed;
     volatile RoutingState state = RoutingState.Disconnected;
 
     public event Action EmergencyReturn;
@@ -57,7 +57,7 @@ public sealed class HeadlessInputBridge : IDisposable {
         if (!IsConnected || state != RoutingState.Windows) return state == RoutingState.Android;
         state = RoutingState.EnteringAndroid;
         ReleaseAll();
-        haveMousePosition = false;
+        haveMousePosition = false; warpPending = false;
         state = RoutingState.Android;
         return true;
     }
@@ -66,7 +66,7 @@ public sealed class HeadlessInputBridge : IDisposable {
         if (state == RoutingState.Windows) return;
         state = RoutingState.ReturningWindows;
         try { ReleaseAll(); } catch { }
-        haveMousePosition = false;
+        haveMousePosition = false; warpPending = false;
         state = IsSocketAlive() ? RoutingState.Windows : RoutingState.Disconnected;
     }
 
@@ -141,14 +141,20 @@ public sealed class HeadlessInputBridge : IDisposable {
     IntPtr MouseCallback(int code, IntPtr wParam, IntPtr lParam) {
         if (code < 0 || state != RoutingState.Android) return CallNextHookEx(mouseHook, code, wParam, lParam);
         MouseData data = (MouseData)Marshal.PtrToStructure(lParam, typeof(MouseData));
+        int msg = wParam.ToInt32();
+        if (msg == WM_MOUSEMOVE && warpPending && Math.Abs(data.pt.x - warpTargetX) <= 2 && Math.Abs(data.pt.y - warpTargetY) <= 2) {
+            warpPending = false; lastX = data.pt.x; lastY = data.pt.y; haveMousePosition = true;
+            return new IntPtr(1);
+        }
         if ((data.flags & LLMHF_INJECTED) != 0) return new IntPtr(1);
-        int msg = wParam.ToInt32(), dx = 0, dy = 0, wheel = 0, hWheel = 0;
+        int dx = 0, dy = 0, wheel = 0, hWheel = 0;
         if (msg == WM_MOUSEMOVE) {
             if (haveMousePosition) { dx = data.pt.x - lastX; dy = data.pt.y - lastY; }
             lastX = data.pt.x; lastY = data.pt.y; haveMousePosition = true;
             int width = GetSystemMetrics(0), height = GetSystemMetrics(1);
             if (data.pt.x < 100 || data.pt.y < 100 || data.pt.x > width - 100 || data.pt.y > height - 100) {
-                lastX = width / 2; lastY = height / 2; SetCursorPos(lastX, lastY);
+                warpTargetX = width / 2; warpTargetY = height / 2; warpPending = true;
+                lastX = warpTargetX; lastY = warpTargetY; SetCursorPos(lastX, lastY);
             }
         } else if (msg == WM_LBUTTONDOWN) mouseButtons |= 1;
         else if (msg == WM_LBUTTONUP) mouseButtons = (byte)(mouseButtons & ~1);

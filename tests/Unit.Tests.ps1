@@ -35,6 +35,7 @@ Assert ($headless -match 'CaptureAndroid' -and $headless -match 'return new IntP
 Assert ($scrcpyPatch -match 'sdl_keycode == SDLK_PRINTSCREEN' -and $scrcpyPatch -match '\+        return;') 'custom scrcpy prevents PrintScreen from reaching Android through UHID'
 Assert ($launcher -match 'exec-out screencap -p') 'screenshot streams directly from Android'
 Assert ($headless -match 'WM_MBUTTONDOWN' -and $headless -match 'mouseButtons \|= 4') 'middle mouse is forwarded over UHID'
+Assert ($headless -match 'warpPending' -and $headless -match 'warpTargetX' -and $headless -match 'return new IntPtr\(1\)') 'cursor recenter event is suppressed instead of forwarded to Android'
 Assert ($launcher -notmatch 'input-bridge|ADB_INPUT|AdbIME|TextBox') 'no legacy chatbox or ADBKeyboard input'
 Assert ($config.scrcpyArguments -contains '--mouse-bind=++++:++++') 'middle click forwards normally to Android'
 Assert ($native -match 'Register\(EXIT_ANDROID, 0x32\)') 'Alt+2 return hotkey registered'
